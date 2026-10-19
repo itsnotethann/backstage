@@ -1,0 +1,17 @@
+plugins {
+	id 'java-library'
+	id 'maven-publish'
+}
+
+java {
+	toolchain.languageVersion = JavaLanguageVersion.of(25)
+}
+
+publishing {
+	publications {
+		maven(MavenPublication) {
+			artifactId = 'backstage-minestom'
+			from components.java
+		}
+	}
+}

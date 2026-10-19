@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "honorbrush",
+	"version": "${version}",
+	"name": "HonorBrush",
+	"description": "Lua build scripts and brushes: drop a .lua file in honorbrush/scripts and build with it.",
+	"authors": ["HonorMC"],
+	"license": "All Rights Reserved",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["net.honormc.brush.HonorBrush"],
+		"client": ["net.honormc.brush.client.HonorBrushClient"]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.0",
+		"fabric-api": "*",
+		"minecraft": "~26.2",
+		"java": ">=25"
+	}
+}
