@@ -12,6 +12,28 @@ One Gradle multi-project build, Gradle 9.7.1 wrapper (Loom 1.18 needs 9.7), Java
 | `minestom/` | `net.honormc:backstage-minestom` | Minestom receiver. |
 | `mod/` | `mod/build/libs/backstage-1.0.0.jar` | Fabric 26.2 client mod. |
 
+## protocol
+
+Package `net.honormc.backstage.protocol`: the `backstage:editor` plugin channel, packet records
+(`ServerboundPacket`, `ClientboundPacket`), data and registry records (`model`), and `EditorCodec`, which the
+mod and the receivers both call to encode and decode message bodies. `./gradlew :protocol:test` covers round
+trips of every packet, VarInt/VarLong boundaries, `BlockPosPacking`, and every decode/encode rejection.
+
+Publish to `mavenLocal()` as `net.honormc:backstage-protocol:1.0.0`:
+
+```bash
+./gradlew :protocol:publishToMavenLocal
+```
+
+### Rules
+
+- JDK only. No Minecraft, Minestom, Fabric, Adventure or Netty classes in this subproject, so the mod and
+  every server can share it.
+- Any wire change bumps `EditorProtocol.VERSION`: an id table, a record layout, a limit or an enum value.
+  Adding a packet bumps it too. No optional fields; client and server must match exactly.
+- `int` fields (box corners, polygon vertices, min/max Y) are VarInts. A shape is a VarInt tag (`0` box,
+  `1` polygon) then its fields; a polygon writes its vertex count, then the x,z pairs.
+
 ## mod
 
 Lua build scripts and brushes: drop a `.lua` file in `<game dir>/backstage/scripts/`, `/bs use <name>` (`/hb` still works),
