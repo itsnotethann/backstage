@@ -50,7 +50,7 @@ publishes `net.honormc:backstage-minestom:1.0.0` (plain jar). `./gradlew :minest
 `net.honormc.backstage.shaded.yaml`; that is the jar a non-OFA server embeds.
 
 `./gradlew :minestom:runDev` boots `EditorDevServer` (offline mode, port 25566, flat world, map `dev`,
-`/devmark <id>`) in `minestom/run/`, which is gitignored. Config: `minestom/run/config/editor/config.yml`
+`/devmark <id>`, `/edit clear <map>` to remove every marker) in `minestom/run/`, which is gitignored. Config: `minestom/run/config/editor/config.yml`
 (written on first start; add your UUID under `editors:` and run `/edit reload`).
 
 ### Rules
@@ -65,6 +65,9 @@ publishes `net.honormc:backstage-minestom:1.0.0` (plain jar). `./gradlew :minest
 - A sidecar with a newer `version` binds empty and read-only (`MapState.writable = false`) and is never
   written. A wrong `format` refuses to bind.
 - Any change to the sidecar layout bumps `MarkerSidecar.VERSION` and adds an upgrade step in `MarkerFile.load`.
+- Every refused edit gets one `EditRejected` with a plain reason: no bound map, another map, a read-only map,
+  a marker type the registry narrowed away, a missing marker, a rename onto an existing id, or a marker that
+  fails `MapMarkers.checkShape` (box min above max, polygon minY above maxY, non-finite point).
 
 ## mod
 
@@ -117,15 +120,58 @@ The mod nests `protocol` (`implementation` + `include project(':protocol')`, so 
   it denied before.
 - `Welcome` shows a vanilla `SystemToast` "Editor available" with the server name; no render hooks, so it
   works on Lunar. Sync packets fill a staged set that replaces the markers at `SyncEnd`;
-  `MarkerChanged`/`MarkerRemoved` patch both. Markers live in memory only and nothing is rendered yet.
+  `MarkerChanged`/`MarkerRemoved` patch both.
 - `Denied(NO_PERMISSION)` is silent, outdated reasons print one chat line with both protocol numbers,
   `REVOKED` prints one line. Disconnect resets to `None`. A body that fails to decode logs once and resets
   to `None`.
-- `/bs editor` prints the state, map, writable flag, marker counts per type and registry counts.
-  `/bs editor resync` asks the server for `MapState` and a full sync.
+- `/bs editor` prints the state, map, writable flag, marker counts per type, registry counts and overlay
+  entity count. `/bs editor resync` asks the server for `MapState` and a full sync.
+
+### Markers
+
+- The client never edits `MarkerStore` ahead of the server. Every edit is sent as `UpsertMarker`,
+  `RemoveMarker` or `RenameMarker` and shows up only when `MarkerChanged`/`MarkerRemoved` comes back. The one
+  local preview is the group being painted (`GroupDraft`, drawn magenta), which is not in the store.
+- `EditorClient.edit` checks every packet against the `EditorProtocol` limits (`MarkerCheck`, including the
+  encoded size) before sending, and records it in a 50-step per-session undo stack (`MarkerHistory`) that
+  is separate from the brush undo. An `EditRejected` for the last sent edit drops it from the stack and prints
+  one red chat line. The stack clears on disconnect, `Denied` and map change.
+- `/bs tool <select|point|group|region|off>` picks the wand tool; `off` (the default) leaves the wand on Lua
+  brushes exactly as before. With a tool on, the action bar shows the tool and the marker under the
+  crosshair (type, id, tags, prop count).
+  - point: right-click a block places `point_<n>` on the hit face with your yaw; sneak + right-click a point
+    picks it up, the next right-click puts it down.
+  - group: `/bs group new <id>` or `/bs group edit <id>`, then hold right-click and drag (sneak to remove).
+    `/bs group box` (next two clicks add every non-air block in the box), `/bs group fill` (next click adds
+    connected blocks of the same type, 64 blocks out at most), `/bs group done`. Capped at 3 500 blocks with a
+    chat warning; `UpsertMarker` goes out 500 ms after the last change, never per block.
+  - region: two right-clicks make a box `region_<n>`; `/bs region box [id]`, `/bs region poly [id]` then a
+    click per vertex and `/bs region done`. Y defaults to the clicked heights; `/bs region height <minY>
+    <maxY>` sets it for the region being drawn, or changes the selected region.
+  - select: right-click picks the nearest point along the crosshair, else a group block, else the region you
+    stand in or look at.
+- On the selected marker: `/bs rename <newId>`, `/bs delete`, `/bs tag add|remove <tag>`,
+  `/bs prop set <key> <str|num|bool|block|item> <value>`, `/bs prop remove <key>`, `/bs info` (while a tool is
+  on; with the tool off `/bs info` still describes the brush script). `/bs select <type> <id>` selects by id.
+- `/bs list <points|groups|regions|all> [tag]` is the outliner (`/bs list` alone still lists scripts): each
+  line selects the marker and highlights it for 10 s on click, and `[tp]` only suggests `/tp x y z`.
+- `/bs editor undo` and `/bs editor redo` step through marker edits.
+
+### Rendering
+
+- `MarkerRenderer` draws the store as client-only display entities (negative ids, added straight to the
+  `ClientLevel`, never sent to the server); no render hooks, so it works on Lunar. Points: a small glowing
+  block with a nose towards its yaw, plus a text label (id, tags). Groups: a glowing block display scaled
+  1.002 over each block. Regions: thin glowing bars along every edge and a label at the centre. Green
+  points, orange groups, cyan regions, yellow for the selection, magenta for the group being painted.
+- Only markers within the overlay radius are drawn (`/bs editor radius <n>`, default 96). Group block
+  displays are capped at 1 024 per group and 4 096 in total, nearest groups first; hitting a cap logs once.
+- Each refresh diffs the store against what is drawn and rebuilds only changed markers. Everything is
+  removed on disconnect, `Denied`, a map change or a new level. `/bs editor show
+  <points|groups|regions|labels> <on|off>` toggles each overlay.
 
 ### Not done yet
 
-- No Minestom receiver yet, so multiplayer apply only works on a Fabric server running the mod.
 - Session settings (script, params, radius, wand) reset on restart.
 - Undo doesn't restore block-entity data (chest contents etc).
+- Custom editor screens, models, kinds and forms (later EDITOR phases).
