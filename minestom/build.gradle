@@ -1,10 +1,65 @@
 plugins {
 	id 'java-library'
 	id 'maven-publish'
+	id 'com.gradleup.shadow' version '9.2.2'
+}
+
+base {
+	archivesName = 'backstage-minestom'
 }
 
 java {
 	toolchain.languageVersion = JavaLanguageVersion.of(25)
+}
+
+sourceSets {
+	dev {
+		compileClasspath += sourceSets.main.output
+		runtimeClasspath += sourceSets.main.output
+	}
+}
+
+configurations {
+	devImplementation.extendsFrom implementation
+	devRuntimeOnly.extendsFrom runtimeOnly
+}
+
+dependencies {
+	api project(':protocol')
+	compileOnly "net.minestom:minestom-sm:${minestomVersion}"
+	implementation 'org.yaml:snakeyaml:2.3'
+
+	devImplementation "net.minestom:minestom-sm:${minestomVersion}"
+
+	testImplementation "net.minestom:minestom-sm:${minestomVersion}"
+	testImplementation platform('org.junit:junit-bom:5.12.2')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+	useJUnitPlatform()
+}
+
+shadow {
+	addShadowVariantIntoJavaComponent = false
+}
+
+shadowJar {
+	archiveClassifier = 'all'
+	relocate 'org.yaml.snakeyaml', 'net.honormc.backstage.shaded.yaml'
+}
+
+tasks.register('runDev', JavaExec) {
+	group = 'application'
+	classpath = sourceSets.dev.runtimeClasspath
+	mainClass = 'net.honormc.backstage.minestom.dev.EditorDevServer'
+	javaLauncher = javaToolchains.launcherFor(java.toolchain)
+	def runDir = file('run')
+	workingDir = runDir
+	doFirst {
+		runDir.mkdirs()
+	}
 }
 
 publishing {
