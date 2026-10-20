@@ -8,3 +8,7 @@ out/
 *.iml
 *.polar
 *.markers.dat*
+CLAUDE.md
+AGENTS.md
+.claude/
+.cursor/
