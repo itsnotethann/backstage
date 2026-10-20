@@ -1,15 +1,15 @@
 {
 	"schemaVersion": 1,
-	"id": "honorbrush",
+	"id": "backstage",
 	"version": "${version}",
-	"name": "HonorBrush",
-	"description": "Lua build scripts and brushes: drop a .lua file in honorbrush/scripts and build with it.",
+	"name": "Backstage",
+	"description": "Lua build scripts and brushes: drop a .lua file in backstage/scripts and build with it.",
 	"authors": ["HonorMC"],
 	"license": "All Rights Reserved",
 	"environment": "*",
 	"entrypoints": {
-		"main": ["net.honormc.brush.HonorBrush"],
-		"client": ["net.honormc.brush.client.HonorBrushClient"]
+		"main": ["net.honormc.backstage.Backstage"],
+		"client": ["net.honormc.backstage.client.BackstageClient"]
 	},
 	"depends": {
 		"fabricloader": ">=0.19.0",

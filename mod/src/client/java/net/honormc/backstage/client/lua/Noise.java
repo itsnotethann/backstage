@@ -1,4 +1,4 @@
-package net.honormc.brush.client.lua;
+package net.honormc.backstage.client.lua;
 
 import java.util.Random;
 

@@ -1,4 +1,4 @@
-package net.honormc.brush.client;
+package net.honormc.backstage.client;
 
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.argument;
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommands.literal;
@@ -16,7 +16,7 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
-import net.honormc.brush.client.lua.ScriptRuntime;
+import net.honormc.backstage.client.lua.ScriptRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.world.InteractionHand;
@@ -25,7 +25,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
-public final class HonorBrushClient implements ClientModInitializer {
+public final class BackstageClient implements ClientModInitializer {
     private static final double REACH = 256;
 
     private BrushSession session;
@@ -78,7 +78,7 @@ public final class HonorBrushClient implements ClientModInitializer {
     }
 
     private void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher) {
-        dispatcher.register(literal("hb")
+        var root = dispatcher.register(literal("bs")
                 .executes(c -> help())
                 .then(literal("help").executes(c -> help()))
                 .then(literal("list").executes(c -> list()))
@@ -158,14 +158,15 @@ public final class HonorBrushClient implements ClientModInitializer {
                     BrushSession.info(session.cancel() ? "§7Cancelling..." : "§7Nothing is running.");
                     return 1;
                 })));
+        dispatcher.register(literal("hb").executes(root.getCommand()).redirect(root));
     }
 
     private int help() {
         BrushSession.info("""
-                §6HonorBrush§7 — Lua build scripts. Wand: §f%s§7 (use = run, sneak+use = preview)
-                §f/hb list§7, §f/hb use <script>§7, §f/hb info§7, §f/hb set <param> <value>§7, §f/hb unset <param>
-                §f/hb run§7 / §f/hb preview§7 at your crosshair, §f/hb apply§7, §f/hb clear§7, §f/hb undo§7, §f/hb cancel
-                §f/hb radius <n>§7 (paint scripts), §f/hb rotate <true|false>§7, §f/hb seed <n|random>§7, §f/hb wand§7, §f/hb dir"""
+                §6Backstage§7 — Lua build scripts. Wand: §f%s§7 (use = run, sneak+use = preview)
+                §f/bs list§7, §f/bs use <script>§7, §f/bs info§7, §f/bs set <param> <value>§7, §f/bs unset <param>
+                §f/bs run§7 / §f/bs preview§7 at your crosshair, §f/bs apply§7, §f/bs clear§7, §f/bs undo§7, §f/bs cancel
+                §f/bs radius <n>§7 (paint scripts), §f/bs rotate <true|false>§7, §f/bs seed <n|random>§7, §f/bs wand§7, §f/bs dir"""
                 .formatted(session.wandName()));
         return 1;
     }
@@ -182,7 +183,7 @@ public final class HonorBrushClient implements ClientModInitializer {
 
     private int use(String name) {
         if (!session.store().list().contains(name)) {
-            BrushSession.error("No script '" + name + "'. /hb list shows what's there.");
+            BrushSession.error("No script '" + name + "'. /bs list shows what's there.");
             return 0;
         }
         session.script(name);

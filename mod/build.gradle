@@ -3,14 +3,14 @@ plugins {
 }
 
 base {
-	archivesName = 'honorbrush'
+	archivesName = 'backstage'
 }
 
 loom {
 	splitEnvironmentSourceSets()
 
 	mods {
-		"honorbrush" {
+		"backstage" {
 			sourceSet sourceSets.main
 			sourceSet sourceSets.client
 		}

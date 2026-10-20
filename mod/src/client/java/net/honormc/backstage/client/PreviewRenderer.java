@@ -1,7 +1,7 @@
-package net.honormc.brush.client;
+package net.honormc.backstage.client;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
-import net.honormc.brush.client.lua.Edit;
+import net.honormc.backstage.client.lua.Edit;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;

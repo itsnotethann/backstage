@@ -1,6 +1,6 @@
-package net.honormc.brush.net;
+package net.honormc.backstage.net;
 
-import net.honormc.brush.HonorBrush;
+import net.honormc.backstage.Backstage;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
@@ -10,7 +10,7 @@ public record EditChunkPayload(int op, long[] positions, int[] states, boolean l
     public static final int MAX_ENTRIES = 2000;
 
     public static final Type<EditChunkPayload> TYPE =
-            new Type<>(Identifier.fromNamespaceAndPath(HonorBrush.MOD_ID, "edit_chunk"));
+            new Type<>(Identifier.fromNamespaceAndPath(Backstage.MOD_ID, "edit_chunk"));
 
     public static final StreamCodec<FriendlyByteBuf, EditChunkPayload> CODEC =
             CustomPacketPayload.codec(EditChunkPayload::write, EditChunkPayload::read);

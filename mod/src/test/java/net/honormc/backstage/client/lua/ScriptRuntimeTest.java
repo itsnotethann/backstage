@@ -1,4 +1,4 @@
-package net.honormc.brush.client.lua;
+package net.honormc.backstage.client.lua;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -63,7 +63,7 @@ class ScriptRuntimeTest {
     }
 
     static String bundled(String name) throws Exception {
-        try (InputStream in = ScriptRuntimeTest.class.getResourceAsStream("/assets/honorbrush/scripts/" + name)) {
+        try (InputStream in = ScriptRuntimeTest.class.getResourceAsStream("/assets/backstage/scripts/" + name)) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
     }

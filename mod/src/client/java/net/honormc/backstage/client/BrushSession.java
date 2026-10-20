@@ -1,4 +1,4 @@
-package net.honormc.brush.client;
+package net.honormc.backstage.client;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 import java.util.Arrays;
@@ -10,11 +10,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.honormc.brush.HonorBrush;
-import net.honormc.brush.client.lua.Edit;
-import net.honormc.brush.client.lua.ScriptRuntime;
-import net.honormc.brush.net.EditChunkPayload;
-import net.honormc.brush.net.UndoPayload;
+import net.honormc.backstage.Backstage;
+import net.honormc.backstage.client.lua.Edit;
+import net.honormc.backstage.client.lua.ScriptRuntime;
+import net.honormc.backstage.net.EditChunkPayload;
+import net.honormc.backstage.net.UndoPayload;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -31,7 +31,7 @@ public final class BrushSession {
 
     private final ScriptStore store;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "HonorBrush-Lua");
+        Thread t = new Thread(r, "Backstage-Lua");
         t.setDaemon(true);
         return t;
     });
@@ -58,11 +58,11 @@ public final class BrushSession {
             return;
         }
         if (script == null) {
-            error("No script selected. /hb list, then /hb use <name>.");
+            error("No script selected. /bs list, then /bs use <name>.");
             return;
         }
         if (running != null && !running.isDone()) {
-            error("A script is still running. /hb cancel to stop it.");
+            error("A script is still running. /bs cancel to stop it.");
             return;
         }
         String source;
@@ -89,7 +89,7 @@ public final class BrushSession {
                 mc.execute(() -> error(name + ": " + firstLine(e.getMessage())));
                 return;
             } catch (Throwable t) {
-                HonorBrush.LOG.error("HonorBrush script {} crashed", name, t);
+                Backstage.LOG.error("Backstage script {} crashed", name, t);
                 mc.execute(() -> error(name + " crashed: " + t));
                 return;
             }
@@ -108,7 +108,7 @@ public final class BrushSession {
             previewUntil = System.currentTimeMillis() + PREVIEW_MS;
             BlockPos a = edit.min(), b = edit.max();
             info("§bPreview: §f" + edit.size() + "§b blocks, " + (b.getX() - a.getX() + 1) + "×" + (b.getY() - a.getY() + 1)
-                    + "×" + (b.getZ() - a.getZ() + 1) + " (" + ms + " ms). §f/hb apply§b to place, §f/hb clear§b to drop.");
+                    + "×" + (b.getZ() - a.getZ() + 1) + " (" + ms + " ms). §f/bs apply§b to place, §f/bs clear§b to drop.");
             return;
         }
         preview = null;
@@ -117,7 +117,7 @@ public final class BrushSession {
 
     public void applyPreview() {
         if (preview == null) {
-            error("No preview to apply. Sneak + use the wand (or /hb preview) first.");
+            error("No preview to apply. Sneak + use the wand (or /bs preview) first.");
             return;
         }
         Edit edit = preview;
@@ -127,7 +127,7 @@ public final class BrushSession {
 
     private void send(Edit edit, long ms) {
         if (!ClientPlayNetworking.canSend(EditChunkPayload.TYPE)) {
-            error("This server doesn't have HonorBrush, so it can't place edits. It works in singleplayer, "
+            error("This server doesn't have Backstage, so it can't place edits. It works in singleplayer, "
                     + "or on a server running the mod.");
             return;
         }
@@ -153,7 +153,7 @@ public final class BrushSession {
 
     public void undo() {
         if (!ClientPlayNetworking.canSend(UndoPayload.TYPE)) {
-            error("This server doesn't have HonorBrush.");
+            error("This server doesn't have Backstage.");
             return;
         }
         ClientPlayNetworking.send(UndoPayload.INSTANCE);

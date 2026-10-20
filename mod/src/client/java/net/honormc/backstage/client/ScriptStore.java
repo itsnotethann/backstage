@@ -1,4 +1,4 @@
-package net.honormc.brush.client;
+package net.honormc.backstage.client;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -8,7 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Stream;
 import net.fabricmc.loader.api.FabricLoader;
-import net.honormc.brush.HonorBrush;
+import net.honormc.backstage.Backstage;
 
 public final class ScriptStore {
     private static final List<String> BUNDLED = List.of(
@@ -17,32 +17,37 @@ public final class ScriptStore {
     private final Path dir;
 
     public ScriptStore() {
-        this.dir = FabricLoader.getInstance().getGameDir().resolve("honorbrush").resolve("scripts");
+        this.dir = FabricLoader.getInstance().getGameDir().resolve("backstage").resolve("scripts");
     }
 
     public void init() {
         try {
+            Path game = FabricLoader.getInstance().getGameDir();
+            Path legacy = game.resolve("honorbrush");
+            if (Files.isDirectory(legacy) && !Files.exists(game.resolve("backstage"))) {
+                Files.move(legacy, game.resolve("backstage"));
+            }
             Files.createDirectories(dir);
             for (String name : BUNDLED) {
                 Path target = dir.resolve(name);
                 if (Files.exists(target)) {
                     continue;
                 }
-                try (InputStream in = ScriptStore.class.getResourceAsStream("/assets/honorbrush/scripts/" + name)) {
+                try (InputStream in = ScriptStore.class.getResourceAsStream("/assets/backstage/scripts/" + name)) {
                     if (in != null) {
                         Files.copy(in, target);
                     }
                 }
             }
-            try (InputStream in = ScriptStore.class.getResourceAsStream("/assets/honorbrush/scripts/API.md")) {
+            try (InputStream in = ScriptStore.class.getResourceAsStream("/assets/backstage/scripts/API.md")) {
                 if (in != null) {
                     Files.write(dir.resolve("API.md"), in.readAllBytes());
                 }
             }
         } catch (IOException e) {
-            HonorBrush.LOG.error("Could not set up {}", dir, e);
+            Backstage.LOG.error("Could not set up {}", dir, e);
         }
-        HonorBrush.LOG.info("HonorBrush scripts folder: {}", dir.toAbsolutePath());
+        Backstage.LOG.info("Backstage scripts folder: {}", dir.toAbsolutePath());
     }
 
     public Path dir() {

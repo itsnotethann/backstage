@@ -1,4 +1,4 @@
-package net.honormc.brush.client.lua;
+package net.honormc.backstage.client.lua;
 
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;

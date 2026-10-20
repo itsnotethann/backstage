@@ -1,12 +1,12 @@
-package net.honormc.brush.server;
+package net.honormc.backstage.server;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import net.honormc.brush.HonorBrush;
-import net.honormc.brush.net.EditChunkPayload;
+import net.honormc.backstage.Backstage;
+import net.honormc.backstage.net.EditChunkPayload;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -27,7 +27,7 @@ public final class ServerEdits {
 
     public static void apply(ServerPlayer player, EditChunkPayload chunk) {
         if (!mayBuild(player)) {
-            player.sendSystemMessage(Component.literal("§cHonorBrush: you need creative mode and operator permissions."));
+            player.sendSystemMessage(Component.literal("§cBackstage: you need creative mode and operator permissions."));
             return;
         }
         ServerLevel level = player.level();
@@ -65,20 +65,20 @@ public final class ServerEdits {
                 }
             }
             String skipped = step.skipped > 0 ? " §7(" + step.skipped + " outside loaded area)" : "";
-            player.sendSystemMessage(Component.literal("§aHonorBrush: changed " + step.size() + " blocks." + skipped), true);
-            HonorBrush.LOG.info("{} applied HonorBrush op {} ({} blocks)", player.getName().getString(), step.op, step.size());
+            player.sendSystemMessage(Component.literal("§aBackstage: changed " + step.size() + " blocks." + skipped), true);
+            Backstage.LOG.info("{} applied Backstage op {} ({} blocks)", player.getName().getString(), step.op, step.size());
         }
     }
 
     public static void undo(ServerPlayer player) {
         if (!mayBuild(player)) {
-            player.sendSystemMessage(Component.literal("§cHonorBrush: you need creative mode and operator permissions."));
+            player.sendSystemMessage(Component.literal("§cBackstage: you need creative mode and operator permissions."));
             return;
         }
         Deque<Step> history = HISTORY.get(player.getUUID());
         Step step = history == null ? null : history.poll();
         if (step == null) {
-            player.sendSystemMessage(Component.literal("§eHonorBrush: nothing to undo."), true);
+            player.sendSystemMessage(Component.literal("§eBackstage: nothing to undo."), true);
             return;
         }
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
@@ -88,7 +88,7 @@ public final class ServerEdits {
                 step.level.setBlock(pos, step.previous[i], FLAGS);
             }
         }
-        player.sendSystemMessage(Component.literal("§aHonorBrush: undid " + step.size() + " blocks. "
+        player.sendSystemMessage(Component.literal("§aBackstage: undid " + step.size() + " blocks. "
                 + history.size() + " more undo steps."), true);
     }
 

@@ -1,12 +1,12 @@
-# HonorBrush script API
+# Backstage script API
 
-HonorBrush runs Lua 5.2 scripts (LuaJ) from this folder. Every `.lua` file here is a
-script; subfolders work too (`/hb use castles/keep`). Files are re-read on every run,
+Backstage runs Lua 5.2 scripts (LuaJ) from this folder. Every `.lua` file here is a
+script; subfolders work too (`/bs use castles/keep`). Files are re-read on every run,
 so saving a file is all it takes to update it.
 
-In game: `/hb use <script>`, then right-click a block with the wand (blaze rod by
-default). Sneak + right-click previews with particles; `/hb apply` places the preview.
-`/hb undo` reverts the last edit (25 steps). `/hb set <param> <value>` overrides a param.
+In game: `/bs use <script>`, then right-click a block with the wand (blaze rod by
+default). Sneak + right-click previews with particles; `/bs apply` places the preview.
+`/bs undo` reverts the last edit (25 steps). `/bs set <param> <value>` overrides a param.
 
 ## A script is one of two kinds
 
@@ -17,13 +17,13 @@ block in front of the clicked face (`0,0,0`), in a frame that turns with the pla
 - Write block states as if **forward is north**: `oak_stairs[facing=north]` faces away
   from the player, `facing=south` faces back at them, `east` is right, `west` is left.
   Positions and states are rotated together when the player faces another way.
-  (`/hb rotate false` pins the frame to the player facing north.)
+  (`/bs rotate false` pins the frame to the player facing north.)
 
 **Paint script**: defines `paint(x, y, z, wx, wy, wz)`. Called for every block in a
 sphere around the clicked block. `x, y, z` are offsets from the centre (world axes, no
 rotation), `wx, wy, wz` are world coordinates (use these for noise so dabs line up).
 Return a block string to place, or `nil` to leave the block alone. The radius is
-`params.radius` if the script declares it, otherwise `/hb radius` (default 5, max 128).
+`params.radius` if the script declares it, otherwise `/bs radius` (default 5, max 128).
 
 If a script defines both, `build` wins.
 
@@ -39,7 +39,7 @@ params = {
 }
 ```
 
-`/hb info` shows the description and params; `/hb set height 30` overrides one
+`/bs info` shows the description and params; `/bs set height 30` overrides one
 (it is parsed as the default's type). Read them as `params.height`.
 
 ## Blocks
@@ -75,12 +75,12 @@ Not available: `io`, `os`, `require`, `load`, `dofile`, `debug`.
 
 ## Limits
 
-- 30 seconds of run time, 4,000,000 blocks per edit. `/hb cancel` stops a running script.
+- 30 seconds of run time, 4,000,000 blocks per edit. `/bs cancel` stops a running script.
 - Changes ignore physics: no block updates, so stairs/fences/panes keep exactly the
   states you write (set `east=true` etc. on fences and panes yourself), sand doesn't fall,
   water doesn't flow until something nearby updates.
 - Undo restores block states but not container contents or other block-entity data.
-- Placing needs creative mode and op (or singleplayer). On a server without HonorBrush,
+- Placing needs creative mode and op (or singleplayer). On a server without Backstage,
   scripts still run and preview, but `apply` is refused.
 
 ## Patterns

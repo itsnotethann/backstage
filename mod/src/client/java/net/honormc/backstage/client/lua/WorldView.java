@@ -1,4 +1,4 @@
-package net.honormc.brush.client.lua;
+package net.honormc.backstage.client.lua;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;

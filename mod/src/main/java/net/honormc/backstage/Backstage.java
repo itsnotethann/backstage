@@ -1,19 +1,19 @@
-package net.honormc.brush;
+package net.honormc.backstage;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.honormc.brush.net.EditChunkPayload;
-import net.honormc.brush.net.UndoPayload;
-import net.honormc.brush.server.ServerEdits;
+import net.honormc.backstage.net.EditChunkPayload;
+import net.honormc.backstage.net.UndoPayload;
+import net.honormc.backstage.server.ServerEdits;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public final class HonorBrush implements ModInitializer {
-    public static final String MOD_ID = "honorbrush";
-    public static final Logger LOG = LoggerFactory.getLogger("HonorBrush");
+public final class Backstage implements ModInitializer {
+    public static final String MOD_ID = "backstage";
+    public static final Logger LOG = LoggerFactory.getLogger("Backstage");
 
     @Override
     public void onInitialize() {

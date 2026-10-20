@@ -1,4 +1,4 @@
-package net.honormc.brush.client.lua;
+package net.honormc.backstage.client.lua;
 
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import net.minecraft.core.BlockPos;
