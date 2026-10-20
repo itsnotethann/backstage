@@ -17,7 +17,10 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.honormc.backstage.client.editor.EditorClient;
+import net.honormc.backstage.client.editor.EditorCommands;
 import net.honormc.backstage.client.editor.EditorNetworking;
+import net.honormc.backstage.client.editor.EditorTools;
+import net.honormc.backstage.client.editor.MarkerRenderer;
 import net.honormc.backstage.client.lua.ScriptRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -32,6 +35,9 @@ public final class BackstageClient implements ClientModInitializer {
 
     private BrushSession session;
     private EditorClient editor;
+    private EditorTools tools;
+    private MarkerRenderer renderer;
+    private EditorCommands editorCommands;
 
     @Override
     public void onInitializeClient() {
@@ -39,6 +45,9 @@ public final class BackstageClient implements ClientModInitializer {
         store.init();
         session = new BrushSession(store);
         editor = EditorNetworking.install();
+        tools = new EditorTools(editor);
+        renderer = new MarkerRenderer();
+        editorCommands = new EditorCommands(editor, tools, renderer);
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, ctx) -> registerCommands(dispatcher));
 
@@ -57,7 +66,11 @@ public final class BackstageClient implements ClientModInitializer {
             return InteractionResult.FAIL;
         });
 
-        ClientTickEvents.END_CLIENT_TICK.register(mc -> PreviewRenderer.tick(mc, session));
+        ClientTickEvents.END_CLIENT_TICK.register(mc -> {
+            PreviewRenderer.tick(mc, session);
+            tools.tick(mc, mc.player != null && mc.player.getMainHandItem().is(session.wand()));
+            renderer.tick(mc, editor, tools);
+        });
     }
 
     private boolean holdingWand(Player player, InteractionHand hand) {
@@ -65,6 +78,10 @@ public final class BackstageClient implements ClientModInitializer {
     }
 
     private void useWand(Player player) {
+        if (tools.tool() != EditorTools.Tool.OFF) {
+            tools.click(player);
+            return;
+        }
         runAtCrosshair(player.isShiftKeyDown());
     }
 
@@ -82,7 +99,7 @@ public final class BackstageClient implements ClientModInitializer {
     }
 
     private void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher) {
-        var root = dispatcher.register(literal("bs")
+        var bs = literal("bs")
                 .executes(c -> help())
                 .then(literal("help").executes(c -> help()))
                 .then(literal("list").executes(c -> list()))
@@ -93,7 +110,7 @@ public final class BackstageClient implements ClientModInitializer {
                 .then(literal("use").then(argument("script", StringArgumentType.greedyString())
                         .suggests((c, b) -> SharedSuggestionProvider.suggest(session.store().list(), b))
                         .executes(c -> use(StringArgumentType.getString(c, "script")))))
-                .then(literal("info").executes(c -> info()))
+                .then(literal("info").executes(c -> tools.tool() != EditorTools.Tool.OFF ? editorCommands.info() : info()))
                 .then(literal("set").then(argument("param", StringArgumentType.word())
                         .suggests((c, b) -> SharedSuggestionProvider.suggest(declaredParams().keySet(), b))
                         .then(argument("value", StringArgumentType.greedyString()).executes(this::set))))
@@ -165,6 +182,8 @@ public final class BackstageClient implements ClientModInitializer {
                 .then(literal("editor")
                         .executes(c -> {
                             editor.describe().forEach(BrushSession::info);
+                            BrushSession.info("§7Overlay: §f" + renderer.entityCount() + "§7 display entities within §f"
+                                    + renderer.radius() + "§7 blocks; tool §f" + tools.tool().name().toLowerCase() + "§7.");
                             return 1;
                         })
                         .then(literal("resync").executes(c -> {
@@ -174,7 +193,9 @@ public final class BackstageClient implements ClientModInitializer {
                             }
                             BrushSession.info("§7Asked the server for a fresh copy of this map's markers.");
                             return 1;
-                        }))));
+                        })));
+        editorCommands.attach(bs);
+        var root = dispatcher.register(bs);
         dispatcher.register(literal("hb").executes(root.getCommand()).redirect(root));
     }
 
@@ -184,7 +205,10 @@ public final class BackstageClient implements ClientModInitializer {
                 §f/bs list§7, §f/bs use <script>§7, §f/bs info§7, §f/bs set <param> <value>§7, §f/bs unset <param>
                 §f/bs run§7 / §f/bs preview§7 at your crosshair, §f/bs apply§7, §f/bs clear§7, §f/bs undo§7, §f/bs cancel
                 §f/bs radius <n>§7 (paint scripts), §f/bs rotate <true|false>§7, §f/bs seed <n|random>§7, §f/bs wand§7, §f/bs dir
-                §f/bs editor§7 (server editor status), §f/bs editor resync"""
+                §f/bs editor§7 (server editor status), §f/bs editor resync
+                §6Markers§7: §f/bs tool <select|point|group|region|off>§7, §f/bs group <new|edit|box|fill|done>§7, §f/bs region <box|poly|done|height>
+                §f/bs select <type> <id>§7, §f/bs info§7 (with a tool on), §f/bs rename§7, §f/bs delete§7, §f/bs tag <add|remove>§7, §f/bs prop <set|remove>
+                §f/bs list <points|groups|regions|all> [tag]§7, §f/bs editor show <points|groups|regions|labels> <on|off>§7, §f/bs editor radius <n>§7, §f/bs editor undo§7 / §fredo"""
                 .formatted(session.wandName()));
         return 1;
     }

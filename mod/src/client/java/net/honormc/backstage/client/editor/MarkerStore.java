@@ -1,7 +1,9 @@
 package net.honormc.backstage.client.editor;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import net.honormc.backstage.protocol.model.Marker;
 import net.honormc.backstage.protocol.model.MarkerType;
@@ -11,6 +13,7 @@ public final class MarkerStore {
     private Map<MarkerType, Map<String, Marker>> staged;
     private long revision;
     private long stagedRevision;
+    private long version;
 
     private static Map<MarkerType, Map<String, Marker>> empty() {
         Map<MarkerType, Map<String, Marker>> markers = new EnumMap<>(MarkerType.class);
@@ -44,6 +47,7 @@ public final class MarkerStore {
         }
         revision = stagedRevision;
         staged = null;
+        version++;
         return true;
     }
 
@@ -53,6 +57,7 @@ public final class MarkerStore {
             staged.get(marker.type()).put(marker.id(), marker);
         }
         this.revision = revision;
+        version++;
     }
 
     void removed(long revision, MarkerType type, String id) {
@@ -61,6 +66,7 @@ public final class MarkerStore {
             staged.get(type).remove(id);
         }
         this.revision = revision;
+        version++;
     }
 
     void clear() {
@@ -69,6 +75,7 @@ public final class MarkerStore {
         }
         staged = null;
         revision = 0;
+        version++;
     }
 
     public int count() {
@@ -89,5 +96,25 @@ public final class MarkerStore {
 
     public long revision() {
         return revision;
+    }
+
+    public long version() {
+        return version;
+    }
+
+    public Marker get(MarkerType type, String id) {
+        return current.get(type).get(id);
+    }
+
+    public List<Marker> all() {
+        List<Marker> all = new ArrayList<>();
+        for (Map<String, Marker> markers : current.values()) {
+            all.addAll(markers.values());
+        }
+        return all;
+    }
+
+    public <T extends Marker> List<T> all(MarkerType type, Class<T> kind) {
+        return current.get(type).values().stream().map(kind::cast).toList();
     }
 }

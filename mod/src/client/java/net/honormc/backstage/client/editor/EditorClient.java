@@ -25,8 +25,10 @@ public final class EditorClient {
     private final Output out;
     private final String modVersion;
     private final MarkerStore store = new MarkerStore();
+    private final MarkerHistory history = new MarkerHistory();
     private EditorState state = new EditorState.None();
     private boolean decodeFailureLogged;
+    private String lastStepProblem;
 
     public EditorClient(Output out, String modVersion) {
         this.out = out;
@@ -52,6 +54,7 @@ public final class EditorClient {
     public synchronized void disconnected() {
         state = new EditorState.None();
         store.clear();
+        history.clear();
         decodeFailureLogged = false;
     }
 
@@ -61,6 +64,80 @@ public final class EditorClient {
         }
         out.send(EditorCodec.encode(new ServerboundPacket.Resync()));
         return true;
+    }
+
+    public synchronized String editableMap() {
+        if (!(state instanceof EditorState.Available available)) {
+            return null;
+        }
+        return available.bound() && available.writable() ? available.map() : null;
+    }
+
+    public synchronized String cannotEdit() {
+        if (!(state instanceof EditorState.Available available)) {
+            return "The editor is not available on this server.";
+        }
+        if (!available.bound()) {
+            return "No editable map here.";
+        }
+        if (!available.writable()) {
+            return "Map " + available.map() + " is read-only.";
+        }
+        return null;
+    }
+
+    public synchronized String edit(MarkerHistory.Op op) {
+        String problem = send(op);
+        if (problem == null) {
+            history.record(op);
+        }
+        return problem;
+    }
+
+    public synchronized MarkerHistory.Op undo() {
+        return step(history.undo().orElse(null), "Nothing to undo.");
+    }
+
+    public synchronized MarkerHistory.Op redo() {
+        return step(history.redo().orElse(null), "Nothing to redo.");
+    }
+
+    public synchronized String lastStepProblem() {
+        return lastStepProblem;
+    }
+
+    private MarkerHistory.Op step(MarkerHistory.Op op, String empty) {
+        lastStepProblem = cannotEdit();
+        if (lastStepProblem != null) {
+            if (op != null) {
+                history.revert();
+            }
+            return null;
+        }
+        if (op == null) {
+            lastStepProblem = empty;
+            return null;
+        }
+        lastStepProblem = send(op);
+        if (lastStepProblem != null) {
+            history.revert();
+            return null;
+        }
+        return op;
+    }
+
+    private String send(MarkerHistory.Op op) {
+        String problem = cannotEdit();
+        if (problem != null) {
+            return problem;
+        }
+        ServerboundPacket packet = op.packet(editableMap());
+        problem = MarkerCheck.packet(packet);
+        if (problem != null) {
+            return problem;
+        }
+        out.send(EditorCodec.encode(packet));
+        return null;
     }
 
     public synchronized void receive(byte[] body) {
@@ -77,6 +154,7 @@ public final class EditorClient {
             }
             state = new EditorState.None();
             store.clear();
+            history.clear();
             return;
         }
         switch (packet) {
@@ -95,6 +173,7 @@ public final class EditorClient {
             return;
         }
         store.clear();
+        history.clear();
         state = new EditorState.Available(welcome.serverName(), "", false, false, 0, EditorState.EMPTY_REGISTRY);
         out.toast("Editor available", welcome.serverName());
     }
@@ -102,6 +181,7 @@ public final class EditorClient {
     private void denied(ClientboundPacket.Denied denied) {
         state = new EditorState.Denied(denied.reason(), denied.serverProtocol());
         store.clear();
+        history.clear();
         switch (denied.reason()) {
             case NO_PERMISSION -> {
             }
@@ -121,6 +201,7 @@ public final class EditorClient {
             case ClientboundPacket.MapState p -> {
                 if (!p.bound() || !p.map().equals(available.map())) {
                     store.clear();
+                    history.clear();
                 }
                 return available.withMap(p.bound(), p.map(), p.writable()).withCount(store.count());
             }
@@ -149,7 +230,10 @@ public final class EditorClient {
                     store.removed(p.revision(), p.type(), p.id());
                 }
             }
-            case ClientboundPacket.EditRejected p -> out.chat("§cBackstage editor: " + p.reason());
+            case ClientboundPacket.EditRejected p -> {
+                history.rejected(p.type(), p.id());
+                out.chat("§cBackstage editor: " + p.reason());
+            }
             default -> {
             }
         }

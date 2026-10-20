@@ -1,8 +1,10 @@
 package net.honormc.backstage.minestom.dev;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import net.honormc.backstage.minestom.EditorConfig;
 import net.honormc.backstage.minestom.EditorServer;
 import net.honormc.backstage.minestom.MapMarkers;
@@ -11,6 +13,7 @@ import net.honormc.backstage.protocol.model.FieldType;
 import net.honormc.backstage.protocol.model.KindDef;
 import net.honormc.backstage.protocol.model.ListDef;
 import net.honormc.backstage.protocol.model.ListEntry;
+import net.honormc.backstage.protocol.model.Marker;
 import net.honormc.backstage.protocol.model.MarkerType;
 import net.honormc.backstage.protocol.model.Point;
 import net.kyori.adventure.text.Component;
@@ -61,9 +64,38 @@ public final class EditorDevServer {
         editor.bind(instance, "dev", Path.of("dev.polar"));
         editor.registerCommands(MinecraftServer.getCommandManager());
         MinecraftServer.getCommandManager().register(devmark(editor));
+        MinecraftServer.getCommandManager().getCommand("edit").addSubcommand(clear(editor));
         MinecraftServer.getSchedulerManager().buildShutdownTask(editor::shutdown);
 
         server.start("0.0.0.0", PORT);
+    }
+
+    private static Command clear(EditorServer editor) {
+        Command command = new Command("clear");
+        ArgumentWord map = ArgumentType.Word("map");
+        command.setCondition((sender, input) -> !(sender instanceof Player player) || editor.permission().mayEdit(player));
+        command.setDefaultExecutor((sender, context) -> sender.sendMessage(Component.text("Usage: /edit clear <map>")));
+        command.addSyntax((sender, context) -> {
+            Optional<MapMarkers> found = editor.markers(context.get(map));
+            if (found.isEmpty()) {
+                sender.sendMessage(Component.text("Map " + context.get(map) + " is not bound."));
+                return;
+            }
+            MapMarkers markers = found.get();
+            List<Marker> all = new ArrayList<>();
+            all.addAll(markers.points());
+            all.addAll(markers.groups());
+            all.addAll(markers.regions());
+            try {
+                for (Marker marker : all) {
+                    markers.remove(marker.type(), marker.id());
+                }
+                sender.sendMessage(Component.text("Removed " + all.size() + " markers from " + markers.map() + "."));
+            } catch (IllegalStateException e) {
+                sender.sendMessage(Component.text(e.getMessage()));
+            }
+        }, map);
+        return command;
     }
 
     private static Command devmark(EditorServer editor) {

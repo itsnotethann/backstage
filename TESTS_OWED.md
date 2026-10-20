@@ -16,3 +16,14 @@ Checks that need a real Minecraft client.
 | P4 mod handshake | With the mod installed, join the dev server as a player who is not op and not in `editors:`, then run `/bs editor` | No toast and no chat line; `/bs editor` says denied (no permission) |
 | P4 mod handshake | Join the dev server with a vanilla client (no mod) | Joins and plays normally; no errors in the server or client log |
 | P4 mod handshake | With the mod installed, join any server without the receiver (e.g. a vanilla server) and run `/bs editor` | No toast; `/bs editor` says the server has no Backstage editor |
+| P5 markers | As an editor on `./gradlew :minestom:runDev`, `/bs tool point`, right-click a block, then leave and rejoin | A green point with a `point_1` label is drawn again after rejoining |
+| P5 markers | `/bs group new flag`, hold right-click and drag across about 200 blocks, wait a second, then `/edit dump dev` | The blocks glow orange (magenta while painting) and the dump lists group `flag` with 200 blocks |
+| P5 markers | `/bs group box`, click two corners of a box over 3 500 solid blocks | Chat warns the group is capped at 3 500; no more blocks are added |
+| P5 markers | `/bs tool region`, click two corners; then `/bs region poly`, click 5 vertices, `/bs region done` | Both outlines are drawn as cyan bars with a label at the centre |
+| P5 markers | Select a marker, then `/bs tag add boss`, `/bs prop set hp num 500`, `/bs rename boss_spawn`; `/bs delete` another; restart `runDev` and rejoin | Tag, prop, new id and the deletion all survive the restart (`/bs info` and `/edit dump dev`) |
+| P5 markers | `/bs delete` a marker, `/bs editor undo`, then `/bs editor redo` | Undo brings the marker back with its tags and props; redo removes it again |
+| P5 markers | `/bs list all`, click a line, then click `[tp]` | The marker is selected and highlighted yellow for 10 s; `[tp]` only fills `/tp x y z` into the chat box |
+| P5 markers | `/bs editor show groups off`, then `on`; `/bs editor radius 16` | Group overlay disappears and returns; markers further than 16 blocks are no longer drawn |
+| P5 markers | Join the dev server with the mod as a player who is not an editor | No overlays are drawn; `/bs tool point` then a click says the editor is not available, and nothing changes on the server |
+| P5 markers | `/bs tool off`, `/bs use tower`, right-click with the wand | The Lua brush previews and builds exactly as before |
+| P5 markers | Repeat the point, group, region, rename and undo checks on Lunar Client | Same results; overlays render without render hooks |
