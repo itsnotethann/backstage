@@ -331,17 +331,10 @@ public final class EditorServer {
             }
         }
         LoadedMap current = loadedFor(player.getInstance());
-        if (current == null) {
-            send(player, new EditRejected(map, type, id, "No editable map here."));
-            return;
-        }
-        MapMarkers markers = current.markers();
-        if (!markers.map().equals(map)) {
-            send(player, new EditRejected(map, type, id, "You are on map " + markers.map() + ", not " + map + "."));
-            return;
-        }
-        if (!markers.writable()) {
-            send(player, new EditRejected(map, type, id, "Map " + map + " is read-only: its markers file is newer than this server."));
+        MapMarkers markers = current == null ? null : current.markers();
+        String rejection = rejection(markers, registry.snapshot().types(), map, type);
+        if (rejection != null) {
+            send(player, new EditRejected(map, type, id, rejection));
             return;
         }
         try {
@@ -365,6 +358,22 @@ public final class EditorServer {
         } catch (IllegalArgumentException | IllegalStateException e) {
             send(player, new EditRejected(map, type, id, e.getMessage()));
         }
+    }
+
+    static String rejection(MapMarkers markers, Collection<MarkerType> types, String map, MarkerType type) {
+        if (markers == null) {
+            return "No editable map here.";
+        }
+        if (!markers.map().equals(map)) {
+            return "You are on map " + markers.map() + ", not " + map + ".";
+        }
+        if (!markers.writable()) {
+            return "Map " + map + " is read-only: its markers file is newer than this server.";
+        }
+        if (!types.contains(type)) {
+            return "This server does not use " + type.name().toLowerCase() + " markers.";
+        }
+        return null;
     }
 
     private void sendMapState(Player player, Instance instance) {

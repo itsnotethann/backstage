@@ -11,6 +11,7 @@ import net.honormc.backstage.protocol.model.Marker;
 import net.honormc.backstage.protocol.model.MarkerType;
 import net.honormc.backstage.protocol.model.Point;
 import net.honormc.backstage.protocol.model.Region;
+import net.honormc.backstage.protocol.model.Shape;
 
 public final class MapMarkers {
     interface Listener {
@@ -86,6 +87,7 @@ public final class MapMarkers {
     public synchronized long upsert(Marker marker) {
         checkWritable();
         checkId(marker.id());
+        checkShape(marker);
         byType.get(marker.type()).put(marker.id(), marker);
         revision++;
         listener.changed(this, revision, marker);
@@ -126,6 +128,33 @@ public final class MapMarkers {
     private static void checkId(String id) {
         if (!EditorProtocol.isValidId(id)) {
             throw new IllegalArgumentException("invalid marker id '" + id + "'");
+        }
+    }
+
+    static void checkShape(Marker marker) {
+        switch (marker) {
+            case Point p -> {
+                if (!Double.isFinite(p.x()) || !Double.isFinite(p.y()) || !Double.isFinite(p.z())
+                        || !Float.isFinite(p.yaw()) || !Float.isFinite(p.pitch())) {
+                    throw new IllegalArgumentException("point '" + p.id() + "' has a non-finite position or rotation");
+                }
+            }
+            case Group g -> {
+            }
+            case Region r -> {
+                switch (r.shape()) {
+                    case Shape.Box b -> {
+                        if (b.minX() > b.maxX() || b.minY() > b.maxY() || b.minZ() > b.maxZ()) {
+                            throw new IllegalArgumentException("region '" + r.id() + "' has a box with min above max");
+                        }
+                    }
+                    case Shape.Polygon p -> {
+                        if (p.minY() > p.maxY()) {
+                            throw new IllegalArgumentException("region '" + r.id() + "' has minY above maxY");
+                        }
+                    }
+                }
+            }
         }
     }
 
