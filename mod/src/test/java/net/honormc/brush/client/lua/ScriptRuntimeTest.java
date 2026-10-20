@@ -24,8 +24,6 @@ import org.junit.jupiter.api.Test;
 import org.luaj.vm2.LuaError;
 
 class ScriptRuntimeTest {
-
-    /** Stone up to y=63, air above, plus whatever a test puts in. */
     static final class FlatWorld implements WorldView {
         final Map<Long, BlockState> blocks = new HashMap<>();
 
@@ -126,7 +124,6 @@ class ScriptRuntimeTest {
         Edit edit = run(src, Direction.EAST, Map.of());
         assertTrue(edit.changes().containsKey(HIT.east(2).asLong()));
         assertFalse(edit.changes().containsKey(HIT.above().asLong()));
-        // x²+z² <= 2.5²: 1 centre + 4 at d²=1 + 4 at 2 + 4 at 4 + 8 at 5
         assertEquals(21, edit.size(), "radius-2 disc of a sphere");
     }
 

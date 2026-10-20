@@ -10,14 +10,7 @@ import java.util.stream.Stream;
 import net.fabricmc.loader.api.FabricLoader;
 import net.honormc.brush.HonorBrush;
 
-/**
- * The scripts folder: {@code <game dir>/honorbrush/scripts}. Scripts are read
- * fresh from disk on every run, so editing a file (by hand or by a tool) takes
- * effect on the next click with no reload step.
- */
 public final class ScriptStore {
-
-    /** Shipped in the jar and copied out on first launch; never overwritten after. */
     private static final List<String> BUNDLED = List.of(
             "API.md", "tower.lua", "tree.lua", "terrain.lua", "overlay.lua", "dome.lua", "house.lua");
 
@@ -41,7 +34,6 @@ public final class ScriptStore {
                     }
                 }
             }
-            // API.md is documentation, so keep it current with the jar even if it exists.
             try (InputStream in = ScriptStore.class.getResourceAsStream("/assets/honorbrush/scripts/API.md")) {
                 if (in != null) {
                     Files.write(dir.resolve("API.md"), in.readAllBytes());
@@ -57,7 +49,6 @@ public final class ScriptStore {
         return dir;
     }
 
-    /** Script names without {@code .lua}, subfolders joined with '/'. */
     public List<String> list() {
         if (!Files.isDirectory(dir)) {
             return List.of();

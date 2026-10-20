@@ -7,13 +7,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.luaj.vm2.LuaError;
 
-/**
- * Block strings in scripts use command syntax: {@code "stone"},
- * {@code "minecraft:oak_stairs[facing=east,half=top]"}. Parsed states are
- * cached, since a build script names the same few blocks thousands of times.
- */
 public final class BlockParser {
-
     private final HolderLookup<Block> lookup;
     private final ConcurrentHashMap<String, BlockState> cache = new ConcurrentHashMap<>();
 

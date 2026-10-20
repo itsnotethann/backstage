@@ -26,23 +26,11 @@ import org.luaj.vm2.lib.ZeroArgFunction;
 import org.luaj.vm2.lib.jse.JseBaseLib;
 import org.luaj.vm2.lib.jse.JseMathLib;
 
-/**
- * Runs one script once and returns the blocks it wants changed. Nothing here
- * touches the world: reads go through a {@link WorldView}, writes go
- * into an {@link Edit} that the caller previews or sends to the server.
- *
- * <p>The sandbox has base, string, table, math and bit32, with no io, os,
- * require, load-from-file or luajava. A debug hook enforces the time limit and
- * is removed from the globals before the script runs.
- */
 public final class ScriptRuntime {
-
-    /** Hard cap on blocks in one edit, so a runaway loop cannot eat the heap. */
     public static final int MAX_BLOCKS = 4_000_000;
     public static final long TIMEOUT_MS = 30_000;
     private static final int MAX_PRINT_LINES = 30;
 
-    /** What the player asked for: where, which way, and with what settings. */
     public record Request(
             String scriptName,
             String source,
@@ -75,7 +63,6 @@ public final class ScriptRuntime {
         this.output = output;
     }
 
-    /** Overrides the run-time limit; tests use a short one. */
     public ScriptRuntime timeout(long ms) {
         this.timeoutMs = ms;
         return this;
@@ -115,10 +102,8 @@ public final class ScriptRuntime {
         return edit;
     }
 
-    /** What a script declares without running it: its {@code description} and {@code params} defaults. */
     public record Info(String description, String mode, java.util.SortedMap<String, String> params) {}
 
-    /** Evaluates only the script's top level (definitions), never build/paint. */
     public Info describe(String name, String source) {
         edit = new Edit();
         noise = new Noise(0);
@@ -138,7 +123,6 @@ public final class ScriptRuntime {
         return new Info(description.isstring() ? description.tojstring() : "", mode, params);
     }
 
-    /** Calls {@code paint(x, y, z, wx, wy, wz)} for every block in a sphere and sets what it returns. */
     private void paint(LuaValue fn, int radius) {
         BlockPos o = frame.origin();
         double r2 = (radius + 0.5) * (radius + 0.5);
@@ -159,8 +143,6 @@ public final class ScriptRuntime {
             }
         }
     }
-
-    // ---- world access, all in script coordinates ----
 
     private void set(int x, int y, int z, LuaValue block) {
         if (block.isnil()) {
@@ -246,12 +228,10 @@ public final class ScriptRuntime {
         }
     }
 
-    // ---- sandbox ----
-
     private Globals sandbox() {
         Globals g = new Globals();
         g.load(new JseBaseLib());
-        g.load(new PackageLib()); // the other libs register in package.loaded; hidden below
+        g.load(new PackageLib());
         g.load(new TableLib());
         g.load(new StringLib());
         g.load(new JseMathLib());
@@ -260,7 +240,6 @@ public final class ScriptRuntime {
         LoadState.install(g);
         LuaC.install(g);
 
-        // Time limit: a count hook every 10k instructions. Installed, then debug is hidden.
         g.get("debug").get("sethook").invoke(LuaValue.varargsOf(
                 new ZeroArgFunction() {
                     @Override
@@ -320,7 +299,6 @@ public final class ScriptRuntime {
         g.set("fbm", fn(a -> LuaValue.valueOf(noise.fbm(a.checkdouble(1), a.checkdouble(2), a.checkdouble(3), a.optint(4, 4)))));
         g.set("rand", g.get("math").get("random"));
         g.set("pick", fn(a -> {
-            // pick({"stone", "andesite", "cobblestone"}) or pick({stone = 3, mossy_cobblestone = 1})
             LuaTable t = a.checktable(1);
             if (t.length() > 0) {
                 return t.get(rand(g, t.length()));

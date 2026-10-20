@@ -5,18 +5,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 
-/**
- * Maps script coordinates to world coordinates.
- *
- * <p>Build scripts are written facing north: {@code +x} is to the right (east),
- * {@code +y} is up, {@code +z} is forward (north), and block states are written
- * as if forward were north. When the player faces another way, positions and
- * states are rotated together, so a script's doorway always faces the player.
- *
- * <p>Paint scripts use {@link #identity}: script axes are world axes.
- */
 public final class Frame {
-
     private final BlockPos origin;
     private final int rx, rz, fx, fz;
     private final Rotation rotation;
@@ -36,7 +25,6 @@ public final class Frame {
         };
     }
 
-    /** A build frame looking along {@code forward} (horizontal). */
     public static Frame facing(BlockPos origin, Direction forward) {
         Direction right = forward.getClockWise();
         Rotation rotation = switch (forward) {
@@ -48,7 +36,6 @@ public final class Frame {
         return new Frame(origin, right.getStepX(), right.getStepZ(), forward.getStepX(), forward.getStepZ(), rotation);
     }
 
-    /** Script axes equal world axes; no state rotation. */
     public static Frame identity(BlockPos origin) {
         return new Frame(origin, 1, 0, 0, 1, Rotation.NONE);
     }
@@ -72,12 +59,10 @@ public final class Frame {
         return origin;
     }
 
-    /** Script-authored state to the state placed in the world. */
     public BlockState toWorld(BlockState state) {
         return rotation == Rotation.NONE ? state : state.rotate(rotation);
     }
 
-    /** World state back into the script's north-facing terms. */
     public BlockState toScript(BlockState state) {
         return inverse == Rotation.NONE ? state : state.rotate(inverse);
     }

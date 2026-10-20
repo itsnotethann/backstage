@@ -6,9 +6,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
-/** Asks the server to revert the sender's most recent edit. */
 public record UndoPayload() implements CustomPacketPayload {
-
     public static final UndoPayload INSTANCE = new UndoPayload();
 
     public static final Type<UndoPayload> TYPE =

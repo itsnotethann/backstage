@@ -5,12 +5,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 
-/** The read-only slice of a world a script can see. */
 public interface WorldView {
-
     BlockState blockState(BlockPos pos);
 
-    /** Y of the topmost non-air block in the column. */
     int surfaceY(int x, int z);
 
     boolean inBuildHeight(int y);

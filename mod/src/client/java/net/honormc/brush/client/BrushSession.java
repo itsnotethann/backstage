@@ -26,14 +26,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import org.luaj.vm2.LuaError;
 
-/**
- * Everything the player has set up: the active script, its parameter
- * overrides, brush radius, rotation, seed and wand, plus the preview waiting
- * for {@code /hb apply}. Scripts run on one background thread; results come
- * back to the client thread before anything is shown or sent.
- */
 public final class BrushSession {
-
     private static final long PREVIEW_MS = 120_000;
 
     private final ScriptStore store;
@@ -59,12 +52,6 @@ public final class BrushSession {
         this.store = store;
     }
 
-    // ---- running ----
-
-    /**
-     * Runs the active script at a clicked block; applies it, or keeps it as a preview.
-     * Paint scripts centre on {@code hit}; build scripts start on the block in front of {@code face}.
-     */
     public void run(BlockPos hit, Direction face, Direction facing, boolean previewOnly) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null) {
@@ -180,9 +167,6 @@ public final class BrushSession {
         return false;
     }
 
-    // ---- preview ----
-
-    /** The edit waiting for {@code /hb apply}, or null once it is applied, cleared or expired. */
     public Edit preview() {
         if (preview != null && System.currentTimeMillis() > previewUntil) {
             preview = null;
@@ -193,8 +177,6 @@ public final class BrushSession {
     public void clearPreview() {
         preview = null;
     }
-
-    // ---- settings ----
 
     public String script() {
         return script;
@@ -256,8 +238,6 @@ public final class BrushSession {
     public ScriptStore store() {
         return store;
     }
-
-    // ---- chat ----
 
     static void info(String text) {
         Minecraft mc = Minecraft.getInstance();

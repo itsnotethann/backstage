@@ -7,16 +7,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.world.level.block.state.BlockState;
 
-/**
- * Shows the pending preview with particles: one per changed block for small
- * edits (green = placing, red = clearing to air), and a bounding-box outline
- * for big ones. Particles need no render hooks, which keeps this working on
- * whatever renderer the client (Lunar included) runs.
- */
 final class PreviewRenderer {
-
     private static final int EVERY_TICKS = 10;
-    /** Above this many blocks, draw just the outline. */
     private static final int PER_BLOCK_LIMIT = 1500;
 
     private static final DustParticleOptions PLACE = new DustParticleOptions(0x55FF55, 1.0f);
@@ -63,7 +55,6 @@ final class PreviewRenderer {
 
     private static void edge(Minecraft mc, double ax, double ay, double az, double bx, double by, double bz) {
         double length = Math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay) + (bz - az) * (bz - az));
-        // Half-block spacing, but never more than 200 particles per edge on huge boxes.
         int steps = (int) Math.min(200, Math.max(1, Math.ceil(length * 2)));
         for (int i = 0; i <= steps; i++) {
             double t = (double) i / steps;

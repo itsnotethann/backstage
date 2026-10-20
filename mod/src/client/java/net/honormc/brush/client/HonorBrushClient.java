@@ -25,15 +25,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
-/**
- * Client entrypoint: the {@code /hb} commands, the wand, and the preview.
- *
- * <p>Use the wand on a block to run the active script there; sneak + use to
- * preview instead. The wand reaches 256 blocks, so it also works on blocks
- * well past normal reach.
- */
 public final class HonorBrushClient implements ClientModInitializer {
-
     private static final double REACH = 256;
 
     private BrushSession session;
@@ -46,7 +38,6 @@ public final class HonorBrushClient implements ClientModInitializer {
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, ctx) -> registerCommands(dispatcher));
 
-        // Right-click on a block in reach. FAIL (not SUCCESS) keeps the use packet from reaching the server, so chests and doors stay shut.
         UseBlockCallback.EVENT.register((player, level, hand, hit) -> {
             if (!level.isClientSide() || !holdingWand(player, hand)) {
                 return InteractionResult.PASS;
@@ -54,7 +45,6 @@ public final class HonorBrushClient implements ClientModInitializer {
             useWand(player);
             return InteractionResult.FAIL;
         });
-        // Right-click at air (or a block past reach): raycast far and use that.
         UseItemCallback.EVENT.register((player, level, hand) -> {
             if (!level.isClientSide() || !holdingWand(player, hand)) {
                 return InteractionResult.PASS;
@@ -86,8 +76,6 @@ public final class HonorBrushClient implements ClientModInitializer {
         }
         session.run(block.getBlockPos(), block.getDirection(), mc.player.getDirection(), previewOnly);
     }
-
-    // ---- commands ----
 
     private void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher) {
         dispatcher.register(literal("hb")

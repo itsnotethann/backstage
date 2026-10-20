@@ -2,13 +2,7 @@ package net.honormc.brush.client.lua;
 
 import java.util.Random;
 
-/**
- * Seeded 3D gradient noise, after Ken Perlin's public-domain "improved noise"
- * reference. Output is roughly in [-1, 1]; integer coordinates return 0, so
- * scripts should scale coordinates down (e.g. {@code noise(x/16, y/16, z/16)}).
- */
 public final class Noise {
-
     private final int[] p = new int[512];
 
     public Noise(long seed) {
@@ -49,7 +43,6 @@ public final class Noise {
                         lerp(u, grad(p[ab + 1], x, y - 1, z - 1), grad(p[bb + 1], x - 1, y - 1, z - 1))));
     }
 
-    /** Fractal sum of {@code octaves} layers, normalised back to about [-1, 1]. */
     public double fbm(double x, double y, double z, int octaves) {
         double sum = 0, amp = 1, norm = 0;
         for (int i = 0; i < Math.max(1, Math.min(octaves, 12)); i++) {

@@ -4,13 +4,7 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
-/**
- * The result of running a script: world position to new state, in the order
- * the script wrote them (a later write to the same block wins). Plus the
- * bounding box, for the preview outline.
- */
 public final class Edit {
-
     private final Long2ObjectLinkedOpenHashMap<BlockState> changes = new Long2ObjectLinkedOpenHashMap<>();
     private int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
     private int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
@@ -26,7 +20,6 @@ public final class Edit {
         if (z > maxZ) maxZ = z;
     }
 
-    /** The state this edit will write at {@code pos}, or null if it leaves it alone. */
     BlockState pending(long pos) {
         return changes.get(pos);
     }

@@ -15,23 +15,12 @@ import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
-/**
- * Applies client-computed edits and keeps a per-player undo stack.
- * All methods run on the server thread (Fabric dispatches play payloads there).
- */
 public final class ServerEdits {
-
-    /** Undo steps kept per player; older ones fall off. */
     private static final int MAX_HISTORY = 25;
 
-    /**
-     * No neighbour updates and no shape updates: stairs, fences and panes keep
-     * exactly the state the script asked for, and nothing falls or flows mid-build.
-     */
     private static final int FLAGS = Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
 
     private static final Map<UUID, Deque<Step>> HISTORY = new HashMap<>();
-    /** The step currently being filled by an op's chunks, before its last chunk arrives. */
     private static final Map<UUID, Step> OPEN = new HashMap<>();
 
     private ServerEdits() {}
@@ -105,7 +94,6 @@ public final class ServerEdits {
 
     public static void forget(ServerPlayer player) {
         OPEN.remove(player.getUUID());
-        // History is kept across reconnects within a server session on purpose.
     }
 
     public static void clear() {
@@ -117,12 +105,10 @@ public final class ServerEdits {
         if (!player.isCreative()) {
             return false;
         }
-        // Singleplayer without cheats still counts: it is the owner's own world.
         return player.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)
                 || player.level().getServer().isSingleplayerOwner(player.nameAndId());
     }
 
-    /** One undoable edit: the previous state of every block it changed, in change order. */
     private static final class Step {
         final int op;
         final ServerLevel level;

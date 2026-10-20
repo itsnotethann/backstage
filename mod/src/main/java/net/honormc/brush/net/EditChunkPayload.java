@@ -6,19 +6,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
-/**
- * One slice of an edit. Serverbound custom payloads cap at 32 KiB, so the
- * client splits an edit into chunks of {@link #MAX_ENTRIES} that share an
- * {@code op} id; the server groups them into one undo step.
- *
- * @param op        client-chosen id shared by every chunk of one edit
- * @param positions {@code BlockPos.asLong()} per entry
- * @param states    {@code Block.getId(state)} per entry
- * @param last      true on the final chunk, so the server can report totals
- */
 public record EditChunkPayload(int op, long[] positions, int[] states, boolean last) implements CustomPacketPayload {
-
-    /** 8 bytes per position + up to 3 per varint state, comfortably under 32 KiB. */
     public static final int MAX_ENTRIES = 2000;
 
     public static final Type<EditChunkPayload> TYPE =
