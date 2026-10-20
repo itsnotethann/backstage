@@ -34,6 +34,38 @@ Publish to `mavenLocal()` as `net.honormc:backstage-protocol:1.0.0`:
 - `int` fields (box corners, polygon vertices, min/max Y) are VarInts. A shape is a VarInt tag (`0` box,
   `1` polygon) then its fields; a polygon writes its vertex count, then the x,z pairs.
 
+## minestom
+
+Package `net.honormc.backstage.minestom`: the Minestom receiver. `EditorServer.install(parent, config)` (or
+`install(parent, configFile)`, which also enables `/edit reload`) adds a `backstage` event node, handles the
+handshake, permissions and marker edits, and stores markers per map in a sidecar file. Minestom is
+`compileOnly`, so the host server supplies it.
+
+```bash
+./gradlew :minestom:publishToMavenLocal
+```
+
+publishes `net.honormc:backstage-minestom:1.0.0` (plain jar). `./gradlew :minestom:shadowJar` builds
+`minestom/build/libs/backstage-minestom-1.0.0-all.jar` with the protocol bundled and snakeyaml relocated to
+`net.honormc.backstage.shaded.yaml`; that is the jar a non-OFA server embeds.
+
+`./gradlew :minestom:runDev` boots `EditorDevServer` (offline mode, port 25566, flat world, map `dev`,
+`/devmark <id>`) in `minestom/run/`, which is gitignored. Config: `minestom/run/config/editor/config.yml`
+(written on first start; add your UUID under `editors:` and run `/edit reload`).
+
+### Rules
+
+- Sidecar path: `polar.resolveSibling(<name without ".polar"> + ".markers.dat")`, so `desert.polar` →
+  `desert.markers.dat`. `bind` throws if the path does not end in `.polar`; the `.polar` itself need not exist.
+- The sidecar is gzipped NBT written with Adventure `BinaryTagIO` (`format: "backstage-markers"`,
+  `version: 1`). Lists are ordered by id and props by key, so the same data always writes the same bytes.
+- Saves are debounced 2 s per map on one virtual thread, written to `<file>.tmp` and moved over the file
+  atomically. The first save in a process copies the old file to `<file>.bak`. `unbind`, `saveAll` and
+  `shutdown` save synchronously.
+- A sidecar with a newer `version` binds empty and read-only (`MapState.writable = false`) and is never
+  written. A wrong `format` refuses to bind.
+- Any change to the sidecar layout bumps `MarkerSidecar.VERSION` and adds an upgrade step in `MarkerFile.load`.
+
 ## mod
 
 Lua build scripts and brushes: drop a `.lua` file in `<game dir>/backstage/scripts/`, `/bs use <name>` (`/hb` still works),
