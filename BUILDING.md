@@ -101,6 +101,29 @@ Install: copy the jar into a Fabric 26.2 client's `mods/` (needs Fabric API).
 - Block ids sent over the wire are `Block.getId` (vanilla protocol ids), so a Minestom receiver can
   decode them directly.
 
+### Editor
+
+The mod nests `protocol` (`implementation` + `include project(':protocol')`, so the jar carries
+`META-INF/jars/protocol-1.0.0.jar`) and speaks it on one plugin channel, `backstage:editor`.
+
+- `editor/EditorPayload` (both sides) is the only payload type: raw message bytes, registered on
+  `serverboundPlay()` and `clientboundPlay()`. Bodies are decoded in client code with `EditorCodec`, never in
+  the payload codec.
+- `client/editor/EditorClient` holds the state: `None`, `Handshaking`, `Available(serverName, map, bound,
+  writable, markerCount, registry)`, `Denied(reason, serverProtocol)`. `EditorNetworking` wires it to Fabric.
+- `Hello` is sent only when the server registers `backstage:editor` (Fabric's
+  `ServerboundPlayChannelEvents.REGISTER`) and the state is `None` or `Denied`, so a server that never
+  advertises the channel never sees editor traffic, and `/edit reload` on the server can welcome a player
+  it denied before.
+- `Welcome` shows a vanilla `SystemToast` "Editor available" with the server name; no render hooks, so it
+  works on Lunar. Sync packets fill a staged set that replaces the markers at `SyncEnd`;
+  `MarkerChanged`/`MarkerRemoved` patch both. Markers live in memory only and nothing is rendered yet.
+- `Denied(NO_PERMISSION)` is silent, outdated reasons print one chat line with both protocol numbers,
+  `REVOKED` prints one line. Disconnect resets to `None`. A body that fails to decode logs once and resets
+  to `None`.
+- `/bs editor` prints the state, map, writable flag, marker counts per type and registry counts.
+  `/bs editor resync` asks the server for `MapState` and a full sync.
+
 ### Not done yet
 
 - No Minestom receiver yet, so multiplayer apply only works on a Fabric server running the mod.

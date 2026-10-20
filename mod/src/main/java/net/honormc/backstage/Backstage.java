@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.honormc.backstage.editor.EditorPayload;
 import net.honormc.backstage.net.EditChunkPayload;
 import net.honormc.backstage.net.UndoPayload;
 import net.honormc.backstage.server.ServerEdits;
@@ -19,6 +20,8 @@ public final class Backstage implements ModInitializer {
     public void onInitialize() {
         PayloadTypeRegistry.serverboundPlay().register(EditChunkPayload.TYPE, EditChunkPayload.CODEC);
         PayloadTypeRegistry.serverboundPlay().register(UndoPayload.TYPE, UndoPayload.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(EditorPayload.TYPE, EditorPayload.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(EditorPayload.TYPE, EditorPayload.CODEC);
 
         ServerPlayNetworking.registerGlobalReceiver(EditChunkPayload.TYPE,
                 (payload, ctx) -> ServerEdits.apply(ctx.player(), payload));

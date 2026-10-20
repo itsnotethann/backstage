@@ -16,6 +16,8 @@ import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
+import net.honormc.backstage.client.editor.EditorClient;
+import net.honormc.backstage.client.editor.EditorNetworking;
 import net.honormc.backstage.client.lua.ScriptRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -29,12 +31,14 @@ public final class BackstageClient implements ClientModInitializer {
     private static final double REACH = 256;
 
     private BrushSession session;
+    private EditorClient editor;
 
     @Override
     public void onInitializeClient() {
         ScriptStore store = new ScriptStore();
         store.init();
         session = new BrushSession(store);
+        editor = EditorNetworking.install();
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, ctx) -> registerCommands(dispatcher));
 
@@ -157,7 +161,20 @@ public final class BackstageClient implements ClientModInitializer {
                 .then(literal("cancel").executes(c -> {
                     BrushSession.info(session.cancel() ? "§7Cancelling..." : "§7Nothing is running.");
                     return 1;
-                })));
+                }))
+                .then(literal("editor")
+                        .executes(c -> {
+                            editor.describe().forEach(BrushSession::info);
+                            return 1;
+                        })
+                        .then(literal("resync").executes(c -> {
+                            if (!editor.resync()) {
+                                BrushSession.error("The editor is not available on this server.");
+                                return 0;
+                            }
+                            BrushSession.info("§7Asked the server for a fresh copy of this map's markers.");
+                            return 1;
+                        }))));
         dispatcher.register(literal("hb").executes(root.getCommand()).redirect(root));
     }
 
@@ -166,7 +183,8 @@ public final class BackstageClient implements ClientModInitializer {
                 §6Backstage§7 — Lua build scripts. Wand: §f%s§7 (use = run, sneak+use = preview)
                 §f/bs list§7, §f/bs use <script>§7, §f/bs info§7, §f/bs set <param> <value>§7, §f/bs unset <param>
                 §f/bs run§7 / §f/bs preview§7 at your crosshair, §f/bs apply§7, §f/bs clear§7, §f/bs undo§7, §f/bs cancel
-                §f/bs radius <n>§7 (paint scripts), §f/bs rotate <true|false>§7, §f/bs seed <n|random>§7, §f/bs wand§7, §f/bs dir"""
+                §f/bs radius <n>§7 (paint scripts), §f/bs rotate <true|false>§7, §f/bs seed <n|random>§7, §f/bs wand§7, §f/bs dir
+                §f/bs editor§7 (server editor status), §f/bs editor resync"""
                 .formatted(session.wandName()));
         return 1;
     }

@@ -12,3 +12,7 @@ Checks that need a real Minecraft client.
 | P3 receiver | As an editor run `/devmark a`, then `/bs editor` | Point count for map `dev` goes up by one |
 | P3 receiver | After `/devmark a`, stop and restart `runDev`, then run `/edit dump dev` | Dump lists point `a`; `minestom/run/dev.markers.dat` exists and no `.tmp` is left |
 | P3 receiver | Join the dev server with a vanilla client (no mod) | Joins normally, no errors in the server log |
+| P4 mod handshake | With the mod installed, join `./gradlew :minestom:runDev` (`localhost:25566`) as a player allowed to edit (op level 4 or listed in `editors:`) | "Editor available" toast with the server name; `/bs editor` shows available, map `dev`, writable |
+| P4 mod handshake | With the mod installed, join the dev server as a player who is not op and not in `editors:`, then run `/bs editor` | No toast and no chat line; `/bs editor` says denied (no permission) |
+| P4 mod handshake | Join the dev server with a vanilla client (no mod) | Joins and plays normally; no errors in the server or client log |
+| P4 mod handshake | With the mod installed, join any server without the receiver (e.g. a vanilla server) and run `/bs editor` | No toast; `/bs editor` says the server has no Backstage editor |
