@@ -1,0 +1,13 @@
+{
+	"required": true,
+	"package": "net.honormc.backstage.client.mixin",
+	"compatibilityLevel": "JAVA_25",
+	"client": [
+		"KeyboardHandlerMixin",
+		"MinecraftMixin",
+		"MouseHandlerMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

@@ -34,11 +34,13 @@ import net.minestom.server.instance.block.Block;
 public final class EditorDevServer {
     public static final int PORT = 25566;
 
+    private static final System.Logger LOGGER = System.getLogger("backstage");
+
     private EditorDevServer() {
     }
 
     public static void main(String[] args) {
-        MinecraftServer server = MinecraftServer.init(new Auth.Offline());
+        MinecraftServer server = MinecraftServer.init(new Auth.Online());
 
         InstanceContainer instance = MinecraftServer.getInstanceManager().createInstanceContainer();
         instance.setChunkSupplier(LightingChunk::new);
@@ -68,6 +70,8 @@ public final class EditorDevServer {
         MinecraftServer.getSchedulerManager().buildShutdownTask(editor::shutdown);
 
         server.start("0.0.0.0", PORT);
+        LOGGER.log(System.Logger.Level.INFO, "Backstage dev server on port {0}, map dev, {1} editors",
+                String.valueOf(PORT), editor.config().editors().size());
     }
 
     private static Command clear(EditorServer editor) {

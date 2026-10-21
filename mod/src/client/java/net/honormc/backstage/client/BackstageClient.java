@@ -13,14 +13,16 @@ import java.util.Map;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import net.honormc.backstage.client.editor.EditorClient;
-import net.honormc.backstage.client.editor.EditorCommands;
+import net.honormc.backstage.client.editor.EditorMode;
 import net.honormc.backstage.client.editor.EditorNetworking;
-import net.honormc.backstage.client.editor.EditorTools;
-import net.honormc.backstage.client.editor.MarkerRenderer;
 import net.honormc.backstage.client.lua.ScriptRuntime;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.SharedSuggestionProvider;
@@ -35,9 +37,7 @@ public final class BackstageClient implements ClientModInitializer {
 
     private BrushSession session;
     private EditorClient editor;
-    private EditorTools tools;
-    private MarkerRenderer renderer;
-    private EditorCommands editorCommands;
+    private EditorMode mode;
 
     @Override
     public void onInitializeClient() {
@@ -45,9 +45,8 @@ public final class BackstageClient implements ClientModInitializer {
         store.init();
         session = new BrushSession(store);
         editor = EditorNetworking.install();
-        tools = new EditorTools(editor);
-        renderer = new MarkerRenderer();
-        editorCommands = new EditorCommands(editor, tools, renderer);
+        mode = new EditorMode(Minecraft.getInstance(), editor, session,
+                KeyMappingHelper.registerKeyMapping(EditorMode.toggleKey()));
 
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, ctx) -> registerCommands(dispatcher));
 
@@ -68,9 +67,12 @@ public final class BackstageClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(mc -> {
             PreviewRenderer.tick(mc, session);
-            tools.tick(mc, mc.player != null && mc.player.getMainHandItem().is(session.wand()));
-            renderer.tick(mc, editor, tools);
+            mode.tick();
         });
+        LevelRenderEvents.END_MAIN.register(context -> mode.worldRendered(context.levelState().cameraRenderState,
+                context.gameRenderer().mainRenderTarget()));
+        ClientPlayConnectionEvents.DISCONNECT.register((listener, mc) -> mc.execute(mode::disconnected));
+        ClientLifecycleEvents.CLIENT_STOPPING.register(mc -> mode.saveLayout());
     }
 
     private boolean holdingWand(Player player, InteractionHand hand) {
@@ -78,10 +80,6 @@ public final class BackstageClient implements ClientModInitializer {
     }
 
     private void useWand(Player player) {
-        if (tools.tool() != EditorTools.Tool.OFF) {
-            tools.click(player);
-            return;
-        }
         runAtCrosshair(player.isShiftKeyDown());
     }
 
@@ -110,7 +108,7 @@ public final class BackstageClient implements ClientModInitializer {
                 .then(literal("use").then(argument("script", StringArgumentType.greedyString())
                         .suggests((c, b) -> SharedSuggestionProvider.suggest(session.store().list(), b))
                         .executes(c -> use(StringArgumentType.getString(c, "script")))))
-                .then(literal("info").executes(c -> tools.tool() != EditorTools.Tool.OFF ? editorCommands.info() : info()))
+                .then(literal("info").executes(c -> info()))
                 .then(literal("set").then(argument("param", StringArgumentType.word())
                         .suggests((c, b) -> SharedSuggestionProvider.suggest(declaredParams().keySet(), b))
                         .then(argument("value", StringArgumentType.greedyString()).executes(this::set))))
@@ -182,8 +180,9 @@ public final class BackstageClient implements ClientModInitializer {
                 .then(literal("editor")
                         .executes(c -> {
                             editor.describe().forEach(BrushSession::info);
-                            BrushSession.info("§7Overlay: §f" + renderer.entityCount() + "§7 display entities within §f"
-                                    + renderer.radius() + "§7 blocks; tool §f" + tools.tool().name().toLowerCase() + "§7.");
+                            BrushSession.info("§7Editor key: §f" + mode.toggleKeyName() + "§7, mode §f"
+                                    + (mode.active() ? "open" : "closed") + "§7, overlay §f" + mode.overlay().drawnBlocks()
+                                    + "§7 group blocks drawn.");
                             return 1;
                         })
                         .then(literal("resync").executes(c -> {
@@ -194,22 +193,16 @@ public final class BackstageClient implements ClientModInitializer {
                             BrushSession.info("§7Asked the server for a fresh copy of this map's markers.");
                             return 1;
                         })));
-        editorCommands.attach(bs);
         var root = dispatcher.register(bs);
         dispatcher.register(literal("hb").executes(root.getCommand()).redirect(root));
     }
 
     private int help() {
-        BrushSession.info("""
-                §6Backstage§7 — Lua build scripts. Wand: §f%s§7 (use = run, sneak+use = preview)
-                §f/bs list§7, §f/bs use <script>§7, §f/bs info§7, §f/bs set <param> <value>§7, §f/bs unset <param>
-                §f/bs run§7 / §f/bs preview§7 at your crosshair, §f/bs apply§7, §f/bs clear§7, §f/bs undo§7, §f/bs cancel
-                §f/bs radius <n>§7 (paint scripts), §f/bs rotate <true|false>§7, §f/bs seed <n|random>§7, §f/bs wand§7, §f/bs dir
-                §f/bs editor§7 (server editor status), §f/bs editor resync
-                §6Markers§7: §f/bs tool <select|point|group|region|off>§7, §f/bs group <new|edit|box|fill|done>§7, §f/bs region <box|poly|done|height>
-                §f/bs select <type> <id>§7, §f/bs info§7 (with a tool on), §f/bs rename§7, §f/bs delete§7, §f/bs tag <add|remove>§7, §f/bs prop <set|remove>
-                §f/bs list <points|groups|regions|all> [tag]§7, §f/bs editor show <points|groups|regions|labels> <on|off>§7, §f/bs editor radius <n>§7, §f/bs editor undo§7 / §fredo"""
-                .formatted(session.wandName()));
+        String key = mode.toggleKeyName();
+        BrushSession.info("§6Backstage§7: press §f" + key + "§7 to open the editor (rebind it in Controls, Backstage).");
+        BrushSession.info("§7Inside the editor: tools on the left, §fCtrl+K§7 for everything, §fHelp§7 lists the shortcuts.");
+        BrushSession.info("§7Lua brushes: §f/bs list§7, §f/bs use <script>§7, wand §f" + session.wandName()
+                + "§7; §f/bs editor§7 shows the editor connection.");
         return 1;
     }
 

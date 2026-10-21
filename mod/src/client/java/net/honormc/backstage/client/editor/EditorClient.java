@@ -20,6 +20,10 @@ public final class EditorClient {
         void toast(String title, String message);
 
         void chat(String line);
+
+        default void rejected(String reason) {
+            chat("§cBackstage editor: " + reason);
+        }
     }
 
     private final Output out;
@@ -41,6 +45,10 @@ public final class EditorClient {
 
     public MarkerStore store() {
         return store;
+    }
+
+    public MarkerHistory history() {
+        return history;
     }
 
     public synchronized void channelsRegistered(Collection<String> channels) {
@@ -232,7 +240,7 @@ public final class EditorClient {
             }
             case ClientboundPacket.EditRejected p -> {
                 history.rejected(p.type(), p.id());
-                out.chat("§cBackstage editor: " + p.reason());
+                out.rejected(p.reason());
             }
             default -> {
             }

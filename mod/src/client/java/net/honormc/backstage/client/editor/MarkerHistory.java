@@ -141,6 +141,14 @@ public final class MarkerHistory {
         last = null;
     }
 
+    public List<Op> undoSteps() {
+        return List.copyOf(undo);
+    }
+
+    public List<Op> redoSteps() {
+        return List.copyOf(redo);
+    }
+
     public int undoSize() {
         return undo.size();
     }

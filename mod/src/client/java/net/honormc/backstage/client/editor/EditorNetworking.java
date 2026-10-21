@@ -17,6 +17,11 @@ public final class EditorNetworking {
     private EditorNetworking() {
     }
 
+    public static void toast(String title, String message) {
+        Minecraft mc = Minecraft.getInstance();
+        SystemToast.add(mc.gui.toastManager(), TOAST, Component.literal(title), Component.literal(message));
+    }
+
     public static EditorClient install() {
         String version = FabricLoader.getInstance().getModContainer(Backstage.MOD_ID)
                 .map(mod -> mod.getMetadata().getVersion().getFriendlyString())
@@ -29,16 +34,34 @@ public final class EditorNetworking {
 
             @Override
             public void toast(String title, String message) {
-                Minecraft mc = Minecraft.getInstance();
-                SystemToast.add(mc.gui.toastManager(), TOAST, Component.literal(title), Component.literal(message));
+                EditorMode mode = EditorMode.get();
+                if (mode == null || !mode.notify(title, message, false)) {
+                    EditorNetworking.toast(title, message);
+                }
             }
 
             @Override
             public void chat(String line) {
+                EditorMode mode = EditorMode.get();
+                if (mode != null && mode.notify(line.replaceAll("§.", ""), "", line.startsWith("§c") || line.startsWith("§e"))) {
+                    return;
+                }
                 Minecraft mc = Minecraft.getInstance();
                 if (mc.player != null) {
                     mc.player.sendSystemMessage(Component.literal(line));
                 }
+            }
+
+            @Override
+            public void rejected(String reason) {
+                EditorMode mode = EditorMode.get();
+                if (mode != null) {
+                    mode.rejected(reason);
+                    if (mode.active()) {
+                        return;
+                    }
+                }
+                chat("§cBackstage editor: " + reason);
             }
         }, version);
 

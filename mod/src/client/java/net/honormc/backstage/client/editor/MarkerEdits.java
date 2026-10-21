@@ -31,6 +31,14 @@ public final class MarkerEdits {
         };
     }
 
+    public static Marker withId(Marker marker, String id) {
+        return switch (marker) {
+            case Point p -> new Point(id, p.x(), p.y(), p.z(), p.yaw(), p.pitch(), p.tags(), p.props());
+            case Group g -> new Group(id, g.blocks(), g.tags(), g.props());
+            case Region r -> new Region(id, r.shape(), r.tags(), r.props());
+        };
+    }
+
     public static Marker addTag(Marker marker, String tag) {
         if (marker.tags().contains(tag)) {
             return marker;

@@ -9,6 +9,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Consumer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.honormc.backstage.Backstage;
 import net.honormc.backstage.client.lua.Edit;
@@ -28,6 +29,8 @@ import org.luaj.vm2.LuaError;
 
 public final class BrushSession {
     private static final long PREVIEW_MS = 120_000;
+
+    private static Consumer<String> messages;
 
     private final ScriptStore store;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
@@ -239,14 +242,22 @@ public final class BrushSession {
         return store;
     }
 
-    static void info(String text) {
+    public static void messages(Consumer<String> sink) {
+        messages = sink;
+    }
+
+    public static void info(String text) {
+        if (messages != null) {
+            messages.accept(text);
+            return;
+        }
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null) {
             mc.player.sendSystemMessage(Component.literal(text));
         }
     }
 
-    static void error(String text) {
+    public static void error(String text) {
         info("§c" + text);
     }
 
