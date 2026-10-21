@@ -30,6 +30,8 @@ dependencies {
 	implementation 'org.yaml:snakeyaml:2.3'
 
 	devImplementation "net.minestom:minestom-sm:${minestomVersion}"
+	devRuntimeOnly 'org.slf4j:slf4j-simple:2.0.18'
+	devRuntimeOnly 'org.slf4j:slf4j-jdk-platform-logging:2.0.18'
 
 	testImplementation "net.minestom:minestom-sm:${minestomVersion}"
 	testImplementation platform('org.junit:junit-bom:5.12.2')
