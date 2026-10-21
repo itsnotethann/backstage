@@ -25,6 +25,13 @@ dependencies {
 	implementation "org.luaj:luaj-jse:${project.luaj_version}"
 	include "org.luaj:luaj-jse:${project.luaj_version}"
 
+	for (String module : ['imgui-java-binding', 'imgui-java-lwjgl3', 'imgui-java-natives-windows', 'imgui-java-natives-linux', 'imgui-java-natives-macos']) {
+		implementation("io.github.spair:${module}:${project.imgui_version}") {
+			exclude group: 'org.lwjgl'
+		}
+		include "io.github.spair:${module}:${project.imgui_version}"
+	}
+
 	implementation project(':protocol')
 	include project(':protocol')
 

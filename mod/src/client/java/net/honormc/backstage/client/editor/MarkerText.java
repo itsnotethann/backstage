@@ -71,6 +71,28 @@ public final class MarkerText {
         };
     }
 
+    public static double[] centre(Marker marker) {
+        return switch (marker) {
+            case Point p -> new double[]{p.x(), p.y() + 0.15, p.z()};
+            case Group g -> {
+                long[] blocks = g.blocks();
+                if (blocks.length == 0) {
+                    yield null;
+                }
+                double sx = 0;
+                double sy = 0;
+                double sz = 0;
+                for (long block : blocks) {
+                    sx += BlockPosPacking.x(block) + 0.5;
+                    sy += BlockPosPacking.y(block) + 0.5;
+                    sz += BlockPosPacking.z(block) + 0.5;
+                }
+                yield new double[]{sx / blocks.length, sy / blocks.length, sz / blocks.length};
+            }
+            case Region r -> MarkerPick.centre(r.shape());
+        };
+    }
+
     public static List<String> details(Marker marker) {
         List<String> lines = new ArrayList<>();
         lines.add("§6" + type(marker.type()) + " §f" + marker.id());

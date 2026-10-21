@@ -3,10 +3,16 @@
 	"id": "backstage",
 	"version": "${version}",
 	"name": "Backstage",
-	"description": "Lua build scripts and brushes: drop a .lua file in backstage/scripts and build with it.",
+	"description": "In-game map editor for Backstage servers, plus Lua build scripts and brushes.",
 	"authors": ["HonorMC"],
 	"license": "All Rights Reserved",
 	"environment": "*",
+	"mixins": [
+		{
+			"config": "backstage.client.mixins.json",
+			"environment": "client"
+		}
+	],
 	"entrypoints": {
 		"main": ["net.honormc.backstage.Backstage"],
 		"client": ["net.honormc.backstage.client.BackstageClient"]

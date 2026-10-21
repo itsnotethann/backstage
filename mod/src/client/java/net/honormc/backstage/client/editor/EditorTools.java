@@ -1,11 +1,16 @@
 package net.honormc.backstage.client.editor;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import net.honormc.backstage.client.BrushSession;
+import net.honormc.backstage.client.editor.GizmoMath.Axis;
 import net.honormc.backstage.protocol.BlockPosPacking;
 import net.honormc.backstage.protocol.EditorProtocol;
 import net.honormc.backstage.protocol.model.Group;
@@ -17,85 +22,250 @@ import net.honormc.backstage.protocol.model.Shape;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
-import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 public final class EditorTools {
-    public static final double REACH = 256;
-    public static final double INSPECT_REACH = 64;
     public static final long DEBOUNCE_MS = 500;
-    public static final long HIGHLIGHT_MS = 10_000;
     public static final int MAX_BOX_VOLUME = 1_000_000;
-
-    private static final int INSPECT_EVERY = 4;
+    public static final float HANDLE_RADIUS = 9;
+    public static final float GIZMO_PIXELS = 90;
+    public static final float YAW_STEP = 45;
+    public static final long MISSING_MS = 2_000;
 
     public enum Tool {
-        SELECT,
-        POINT,
-        GROUP,
-        REGION,
-        OFF
+        SELECT("Select", "select"),
+        POINT("Point", "point"),
+        GROUP("Group brush", "group"),
+        BOX("Box", "box"),
+        REGION("Region polygon", "region"),
+        MOVE("Move", "move"),
+        BRUSH("Brush", "brush");
+
+        private final String title;
+        private final String key;
+
+        Tool(String title, String key) {
+            this.title = title;
+            this.key = key;
+        }
+
+        public String title() {
+            return title;
+        }
+
+        public String key() {
+            return key;
+        }
+
+        public static Tool of(String key) {
+            for (Tool tool : values()) {
+                if (tool.key.equals(key)) {
+                    return tool;
+                }
+            }
+            return SELECT;
+        }
+    }
+
+    public enum BrushMode {
+        PAINT,
+        ERASE,
+        FILL
+    }
+
+    public enum HandleKind {
+        GIZMO,
+        GIZMO_CENTRE,
+        BOX_FACE,
+        POLY_VERTEX,
+        POLY_TOP,
+        POLY_BOTTOM,
+        YAW
     }
 
     public record Selection(MarkerType type, String id) {
     }
 
-    private enum GroupMode {
-        PAINT,
-        BOX,
-        FILL
+    public record Handle(HandleKind kind, double x, double y, double z, Axis axis, int index, int colour) {
+    }
+
+    public record Cursor(MarkerPick.Ray ray, BlockHitResult hit, float x, float y, Marquee.View view, boolean ctrl,
+                         boolean shift, boolean alt) {
+        public BlockPos block() {
+            return hit == null ? null : hit.getBlockPos();
+        }
+    }
+
+    public interface Notifier {
+        void ok(String title, String message);
+
+        void error(String message);
+    }
+
+    private record Drag(Handle handle, MarkerPick.Ray start, List<Marker> before, Shape.Box box, int[] vertex) {
     }
 
     private final EditorClient editor;
-    private Tool tool = Tool.OFF;
-    private Selection selected;
-    private Selection forced;
-    private long forcedUntil;
+    private final BrushSession brushes;
+    private final Notifier notifier;
+    private Tool tool = Tool.SELECT;
+    private final LinkedHashSet<Selection> selection = new LinkedHashSet<>();
+    private final Set<Selection> hidden = new HashSet<>();
+    private final Set<String> reserved = new HashSet<>();
+    private final Map<Selection, Long> missingSince = new HashMap<>();
+    private Marker hovered;
+    private Cursor cursor;
     private long revision;
     private String map;
-    private boolean useWasDown;
-    private int ticks;
-
-    private String grabbed;
-    private final Set<String> reserved = new HashSet<>();
 
     private GroupDraft draft;
     private Group draftBase;
     private long draftVersion;
     private boolean draftDirty;
     private long draftChangedAt;
-    private GroupMode groupMode = GroupMode.PAINT;
-    private BlockPos groupCorner;
+    private Block paintBlock;
     private Long lastPainted;
     private boolean fullWarned;
-    private boolean paintLocked;
+    private boolean painting;
 
-    private boolean regionPoly;
-    private String regionId;
-    private BlockPos regionCorner;
-    private PolygonBuilder polygon;
-    private Integer heightMin;
-    private Integer heightMax;
+    private Shape.Box boxDraft;
+    private BlockPos boxStart;
+    private final List<int[]> polygon = new ArrayList<>();
+    private Integer polyMinY;
+    private Integer polyMaxY;
 
-    public EditorTools(EditorClient editor) {
+    private Drag drag;
+    private double[] moveDelta = {0, 0, 0};
+    private Shape liveShape;
+    private Float liveYaw;
+    private float[] marqueeStart;
+    private Marquee.Rect marquee;
+    private boolean leftDown;
+
+    public int brushRadius = 2;
+    public BrushMode brushMode = BrushMode.PAINT;
+    public boolean sameBlock;
+    public boolean boxAsGroup;
+
+    public EditorTools(EditorClient editor, BrushSession brushes, Notifier notifier) {
         this.editor = editor;
+        this.brushes = brushes;
+        this.notifier = notifier;
+    }
+
+    public EditorClient editor() {
+        return editor;
+    }
+
+    public BrushSession brushes() {
+        return brushes;
     }
 
     public Tool tool() {
         return tool;
     }
 
-    public Selection selected() {
-        return selected;
+    public void tool(Tool next) {
+        if (tool == next) {
+            return;
+        }
+        cancelGesture();
+        if (next != Tool.BOX) {
+            boxDraft = null;
+            boxStart = null;
+        }
+        if (next != Tool.REGION) {
+            polygon.clear();
+        }
+        tool = next;
+        changed();
     }
 
-    public Selection forced() {
-        return forced;
+    public long revision() {
+        return revision;
+    }
+
+    public List<Selection> selection() {
+        return List.copyOf(selection);
+    }
+
+    public Selection primary() {
+        Selection last = null;
+        for (Selection s : selection) {
+            last = s;
+        }
+        return last;
+    }
+
+    public boolean selected(Selection s) {
+        return selection.contains(s);
+    }
+
+    public List<Marker> selectedMarkers() {
+        List<Marker> markers = new ArrayList<>();
+        for (Selection s : selection) {
+            Marker marker = current(s);
+            if (marker != null) {
+                markers.add(marker);
+            }
+        }
+        return markers;
+    }
+
+    public void select(Selection s, boolean add) {
+        if (!add) {
+            selection.clear();
+        }
+        if (s != null) {
+            selection.remove(s);
+            selection.add(s);
+        }
+        changed();
+    }
+
+    public void deselect(Selection s) {
+        selection.remove(s);
+        changed();
+    }
+
+    public void selectAll(Collection<Selection> all, boolean add) {
+        if (!add) {
+            selection.clear();
+        }
+        selection.addAll(all);
+        changed();
+    }
+
+    public void selectNone() {
+        selection.clear();
+        changed();
+    }
+
+    public boolean hidden(Selection s) {
+        return hidden.contains(s);
+    }
+
+    public void hide(Selection s, boolean hide) {
+        if (hide) {
+            hidden.add(s);
+            selection.remove(s);
+        } else {
+            hidden.remove(s);
+        }
+        changed();
+    }
+
+    public Marker hovered() {
+        return hovered;
+    }
+
+    public Cursor cursor() {
+        return cursor;
     }
 
     public GroupDraft draft() {
@@ -106,168 +276,348 @@ public final class EditorTools {
         return draftVersion;
     }
 
-    public long revision() {
-        return revision;
+    public Shape.Box boxDraft() {
+        return boxDraft;
     }
 
-    public void tool(Tool next) {
-        if (tool == Tool.GROUP && next != Tool.GROUP) {
-            closeGroup();
-        }
-        if (next != Tool.POINT) {
-            grabbed = null;
-        }
-        if (next != Tool.REGION) {
-            resetRegion();
-        }
-        tool = next;
-        changed();
-        info(next == Tool.OFF ? "§7Wand is back on Lua brushes." : "§7Tool: §f" + name(next) + "§7. " + hint());
+    public List<int[]> polygonDraft() {
+        return polygon;
     }
 
-    public void tick(Minecraft mc, boolean holdingWand) {
-        ticks++;
+    public Integer polyMinY() {
+        return polyMinY;
+    }
+
+    public Integer polyMaxY() {
+        return polyMaxY;
+    }
+
+    public void polyHeights(Integer minY, Integer maxY) {
+        polyMinY = minY;
+        polyMaxY = maxY;
+    }
+
+    public Marquee.Rect marquee() {
+        return marquee;
+    }
+
+    public double[] moveDelta() {
+        return drag != null && (drag.handle().kind() == HandleKind.GIZMO || drag.handle().kind() == HandleKind.GIZMO_CENTRE)
+                ? moveDelta : null;
+    }
+
+    public Shape liveShape() {
+        return drag != null ? liveShape : null;
+    }
+
+    public Float liveYaw() {
+        return drag != null ? liveYaw : null;
+    }
+
+    public Handle dragging() {
+        return drag == null ? null : drag.handle();
+    }
+
+    public boolean busy() {
+        return drag != null || marquee != null || painting || boxStart != null;
+    }
+
+    public Marker current(Selection s) {
+        if (s == null) {
+            return null;
+        }
+        if (draft != null && s.type() == MarkerType.GROUP && s.id().equals(draft.id())) {
+            return draftBase != null ? MarkerEdits.withBlocks(draftBase, draft.blocks())
+                    : new Group(draft.id(), draft.blocks(), List.of(), Map.of());
+        }
+        return editor.store().get(s.type(), s.id());
+    }
+
+    public void tick() {
         String current = editor.state() instanceof EditorState.Available a && a.bound() ? a.map() : null;
         if (current == null ? map != null : !current.equals(map)) {
             resetSession();
             map = current;
         }
-        if (forced != null && System.currentTimeMillis() > forcedUntil) {
-            forced = null;
-            changed();
-        }
         if (draftDirty && System.currentTimeMillis() - draftChangedAt >= DEBOUNCE_MS) {
             flush();
         }
-        boolean useDown = mc.options.keyUse.isDown();
-        if (tool == Tool.GROUP && draft != null && groupMode == GroupMode.PAINT && useDown && !paintLocked
-                && holdingWand && mc.gui.screen() == null && mc.player != null) {
-            paint(mc.player);
-        } else if (!useDown) {
-            lastPainted = null;
-            fullWarned = false;
-            paintLocked = false;
+        long now = System.currentTimeMillis();
+        for (Selection s : selection) {
+            if (current(s) == null) {
+                missingSince.putIfAbsent(s, now);
+            } else {
+                missingSince.remove(s);
+            }
         }
-        useWasDown = useDown;
-        if (holdingWand && tool != Tool.OFF && mc.player != null && ticks % INSPECT_EVERY == 0
-                && editor.state() instanceof EditorState.Available) {
-            mc.player.sendOverlayMessage(Component.literal(actionBar(mc.player)));
+        selection.removeIf(s -> now - missingSince.getOrDefault(s, now) > MISSING_MS);
+        missingSince.keySet().retainAll(selection);
+    }
+
+    public void hover(Cursor next) {
+        cursor = next;
+        hovered = drag == null ? pick(next) : null;
+        if (leftDown) {
+            drag(next);
         }
     }
 
-    public void click(Player player) {
-        if (useWasDown) {
-            return;
+    public boolean mouseDown(Cursor at) {
+        cursor = at;
+        leftDown = true;
+        Handle handle = handleAt(at);
+        if (handle != null) {
+            beginDrag(handle, at);
+            return true;
         }
         String problem = editor.cannotEdit();
-        if (problem != null && tool != Tool.SELECT) {
-            error(problem);
-            return;
+        if (problem != null && tool != Tool.SELECT && tool != Tool.BRUSH) {
+            notifier.error(problem);
+            leftDown = false;
+            return true;
         }
         switch (tool) {
-            case SELECT -> selectAtCrosshair(player);
-            case POINT -> pointClick(player);
-            case GROUP -> groupClick(player);
-            case REGION -> regionClick(player);
-            case OFF -> {
-            }
+            case SELECT -> selectDown(at);
+            case POINT -> pointDown(at);
+            case GROUP -> groupDown(at);
+            case BOX -> boxDown(at);
+            case REGION -> regionDown(at);
+            case MOVE -> selectDown(at);
+            case BRUSH -> brushDown(at);
+        }
+        return true;
+    }
+
+    public void mouseUp(Cursor at) {
+        cursor = at;
+        leftDown = false;
+        if (drag != null) {
+            endDrag(at);
+        }
+        if (marquee != null) {
+            endMarquee(at);
+        }
+        marqueeStart = null;
+        if (painting) {
+            painting = false;
+            lastPainted = null;
+            fullWarned = false;
+            paintBlock = null;
+        }
+        if (boxStart != null) {
+            boxStart = null;
+            changed();
         }
     }
 
-    private void selectAtCrosshair(Player player) {
-        Marker marker = pick(player, REACH);
+    public void cancelGesture() {
+        drag = null;
+        marquee = null;
+        marqueeStart = null;
+        painting = false;
+        leftDown = false;
+        liveShape = null;
+        liveYaw = null;
+        moveDelta = new double[]{0, 0, 0};
+    }
+
+    public boolean escape() {
+        if (drag != null || marquee != null) {
+            cancelGesture();
+            return true;
+        }
+        if (boxDraft != null) {
+            boxDraft = null;
+            boxStart = null;
+            changed();
+            return true;
+        }
+        if (!polygon.isEmpty()) {
+            polygon.clear();
+            changed();
+            return true;
+        }
+        return false;
+    }
+
+    private void drag(Cursor at) {
+        if (drag != null) {
+            updateDrag(at);
+            return;
+        }
+        if (marqueeStart != null) {
+            if (marquee != null || Math.abs(at.x() - marqueeStart[0]) + Math.abs(at.y() - marqueeStart[1]) > 4) {
+                marquee = Marquee.Rect.between(marqueeStart[0], marqueeStart[1], at.x(), at.y());
+            }
+            return;
+        }
+        if (painting && tool == Tool.GROUP) {
+            paint(at);
+            return;
+        }
+        if (boxStart != null && at.block() != null) {
+            BlockPos end = at.block();
+            boxDraft = BlockSelection.bounds(boxStart.getX(), boxStart.getY(), boxStart.getZ(), end.getX(), end.getY(), end.getZ());
+            changed();
+        }
+    }
+
+    private Marker pick(Cursor at) {
+        if (at == null || at.ray() == null) {
+            return null;
+        }
+        MarkerStore store = editor.store();
+        Long block = at.block() == null ? null : BlockPosPacking.pack(at.block().getX(), at.block().getY(), at.block().getZ());
+        List<Point> points = new ArrayList<>(store.all(MarkerType.POINT, Point.class));
+        points.removeIf(p -> hidden.contains(new Selection(MarkerType.POINT, p.id())));
+        List<Group> groups = new ArrayList<>(store.all(MarkerType.GROUP, Group.class));
+        groups.removeIf(g -> hidden.contains(new Selection(MarkerType.GROUP, g.id())));
+        if (draft != null) {
+            groups.removeIf(g -> g.id().equals(draft.id()));
+            groups.add(new Group(draft.id(), draft.blocks(), List.of(), Map.of()));
+        }
+        List<Region> regions = new ArrayList<>(store.all(MarkerType.REGION, Region.class));
+        regions.removeIf(r -> hidden.contains(new Selection(MarkerType.REGION, r.id())));
+        MarkerPick.Ray ray = at.ray();
+        Point point = MarkerPick.point(ray, points);
+        if (point != null) {
+            return point;
+        }
+        if (block != null) {
+            Group group = MarkerPick.group(block, groups);
+            if (group != null) {
+                return group;
+            }
+        }
+        for (double t = 0; t <= ray.reach(); t += MarkerPick.RAY_STEP) {
+            double x = ray.x() + ray.dx() * t;
+            double y = ray.y() + ray.dy() * t;
+            double z = ray.z() + ray.dz() * t;
+            if (at.hit() != null && at.hit().getLocation().distanceToSqr(ray.x(), ray.y(), ray.z()) < t * t) {
+                break;
+            }
+            for (Region region : regions) {
+                if (MarkerPick.contains(region.shape(), x, y, z) && !MarkerPick.contains(region.shape(), ray.x(), ray.y(), ray.z())) {
+                    return region;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static Selection key(Marker marker) {
+        return new Selection(marker.type(), marker.id());
+    }
+
+    private void selectDown(Cursor at) {
+        Marker marker = hovered != null ? hovered : pick(at);
         if (marker == null) {
-            select(null, false);
-            info("§7Nothing under the crosshair.");
+            marqueeStart = new float[]{at.x(), at.y()};
             return;
         }
-        select(new Selection(marker.type(), marker.id()), false);
-        info("§7Selected " + MarkerText.summary(marker));
+        Selection s = key(marker);
+        if (at.ctrl()) {
+            deselect(s);
+        } else {
+            select(s, at.shift());
+        }
     }
 
-    public void select(Selection selection, boolean highlight) {
-        selected = selection;
-        if (highlight && selection != null) {
-            forced = selection;
-            forcedUntil = System.currentTimeMillis() + HIGHLIGHT_MS;
+    private void endMarquee(Cursor at) {
+        Marquee.Rect rect = marquee;
+        marquee = null;
+        if (rect == null || at.view() == null) {
+            return;
         }
-        changed();
-    }
-
-    public Marker current(Selection selection) {
-        if (selection == null) {
-            return null;
-        }
-        if (draft != null && selection.type() == MarkerType.GROUP && selection.id().equals(draft.id())) {
-            flush();
-            return draftBase;
-        }
-        return editor.store().get(selection.type(), selection.id());
-    }
-
-    public Marker selectedMarker() {
-        return current(selected);
-    }
-
-    public Marker peekSelected() {
-        if (selected == null) {
-            return null;
-        }
-        if (draft != null && selected.type() == MarkerType.GROUP && selected.id().equals(draft.id())) {
-            return draftBase;
-        }
-        return editor.store().get(selected.type(), selected.id());
-    }
-
-    private void pointClick(Player player) {
-        if (player.isShiftKeyDown() && grabbed == null) {
-            Point point = MarkerPick.point(ray(player, REACH), editor.store().all(MarkerType.POINT, Point.class));
-            if (point == null) {
-                error("Sneak + right-click a point to pick it up.");
-                return;
+        List<Marker> candidates = new ArrayList<>();
+        for (Marker marker : editor.store().all()) {
+            if (!hidden.contains(key(marker))) {
+                candidates.add(marker);
             }
-            grabbed = point.id();
-            select(new Selection(MarkerType.POINT, point.id()), false);
-            info("§7Moving §f" + point.id() + "§7: right-click a block to put it there.");
+        }
+        List<Marker> inside = Marquee.select(candidates, MarkerText::centre, at.view(), rect);
+        List<Selection> picked = inside.stream().map(EditorTools::key).toList();
+        if (at.ctrl()) {
+            picked.forEach(selection::remove);
+            changed();
             return;
         }
-        BlockHitResult hit = blockHit(player);
-        if (hit == null) {
+        selectAll(picked, at.shift());
+    }
+
+    private void pointDown(Cursor at) {
+        Marker under = hovered != null ? hovered : pick(at);
+        if (under instanceof Point point) {
+            select(key(point), at.shift());
             return;
         }
-        Vec3 spot = faceCentre(hit);
-        float yaw = Mth.wrapDegrees(player.getYRot());
-        if (grabbed != null) {
-            Point before = (Point) editor.store().get(MarkerType.POINT, grabbed);
-            String id = grabbed;
-            grabbed = null;
-            if (before == null) {
-                error("Point " + id + " no longer exists.");
-                return;
-            }
-            Point after = MarkerEdits.moved(before, spot.x, spot.y, spot.z, yaw);
-            report(editor.edit(new MarkerHistory.Change(before, after)), "§7Moved §f" + id + "§7 to " + MarkerText.xyz(spot.x, spot.y, spot.z) + ".");
+        if (at.hit() == null) {
+            notifier.error("Point the cursor at a block to place a point.");
             return;
         }
+        Vec3 spot = faceCentre(at.hit());
+        float yaw = GizmoMath.snapYaw(cameraYaw(), YAW_STEP);
         Set<String> taken = new HashSet<>(editor.store().markers(MarkerType.POINT).keySet());
         taken.addAll(reserved);
         String id = MarkerIds.next("point", taken);
         Point point = new Point(id, spot.x, spot.y, spot.z, yaw, 0, List.of(), Map.of());
-        if (report(editor.edit(new MarkerHistory.Change(null, point)), "§7Placed §f" + id + "§7 at "
-                + MarkerText.xyz(spot.x, spot.y, spot.z) + ".")) {
+        if (edit(new MarkerHistory.Change(null, point))) {
             reserved.add(id);
             select(new Selection(MarkerType.POINT, id), false);
+            notifier.ok("Placed " + id, MarkerText.xyz(spot.x, spot.y, spot.z));
         }
+    }
+
+    public Vec3 ghostPoint() {
+        if (tool != Tool.POINT || cursor == null || cursor.hit() == null || hovered instanceof Point || busy()) {
+            return null;
+        }
+        return faceCentre(cursor.hit());
+    }
+
+    private static float cameraYaw() {
+        Minecraft mc = Minecraft.getInstance();
+        return mc.player == null ? 0 : Mth.wrapDegrees(mc.player.getYRot());
+    }
+
+    public void snapYaw() {
+        List<MarkerHistory.Op> ops = new ArrayList<>();
+        for (Marker marker : selectedMarkers()) {
+            if (marker instanceof Point p) {
+                float yaw = GizmoMath.snapYaw(p.yaw(), YAW_STEP);
+                if (yaw != p.yaw()) {
+                    ops.add(new MarkerHistory.Change(p, MarkerEdits.moved(p, p.x(), p.y(), p.z(), yaw)));
+                }
+            }
+        }
+        if (ops.isEmpty()) {
+            notifier.error("Select a point to snap its yaw.");
+            return;
+        }
+        editAll(ops);
+    }
+
+    public void rotate(float degrees) {
+        List<MarkerHistory.Op> ops = new ArrayList<>();
+        for (Marker marker : selectedMarkers()) {
+            if (marker instanceof Point p) {
+                float yaw = Mth.wrapDegrees(p.yaw() + degrees);
+                ops.add(new MarkerHistory.Change(p, MarkerEdits.moved(p, p.x(), p.y(), p.z(), yaw)));
+            }
+        }
+        editAll(ops);
     }
 
     public boolean groupNew(String id) {
         String problem = MarkerCheck.id(id);
-        if (problem != null) {
-            error(problem);
-            return false;
+        if (problem == null && (editor.store().get(MarkerType.GROUP, id) != null || draft != null && draft.id().equals(id))) {
+            problem = "A group named " + id + " already exists.";
         }
-        if (editor.store().get(MarkerType.GROUP, id) != null || draft != null && draft.id().equals(id)) {
-            error("Group " + id + " already exists. /bs group edit " + id + " to change it.");
+        if (problem == null) {
+            problem = editor.cannotEdit();
+        }
+        if (problem != null) {
+            notifier.error(problem);
             return false;
         }
         openGroup(id, null);
@@ -275,9 +625,16 @@ public final class EditorTools {
     }
 
     public boolean groupEdit(String id) {
-        Marker marker = editor.store().get(MarkerType.GROUP, id);
-        if (!(marker instanceof Group group)) {
-            error("No group named " + id + ".");
+        if (draft != null && draft.id().equals(id)) {
+            return true;
+        }
+        if (!(editor.store().get(MarkerType.GROUP, id) instanceof Group group)) {
+            notifier.error("No group named " + id + ".");
+            return false;
+        }
+        String problem = editor.cannotEdit();
+        if (problem != null) {
+            notifier.error(problem);
             return false;
         }
         openGroup(id, group);
@@ -285,156 +642,118 @@ public final class EditorTools {
     }
 
     private void openGroup(String id, Group base) {
-        String problem = editor.cannotEdit();
-        if (problem != null) {
-            error(problem);
-            return;
-        }
         closeGroup();
         draft = new GroupDraft(id, base == null ? new long[0] : base.blocks());
         draftBase = base;
         draftDirty = false;
-        groupMode = GroupMode.PAINT;
-        groupCorner = null;
-        selected = new Selection(MarkerType.GROUP, id);
+        select(new Selection(MarkerType.GROUP, id), false);
         draftChanged();
-        if (tool != Tool.GROUP) {
-            tool = Tool.GROUP;
-        }
-        info("§7Editing group §f" + id + "§7 (" + draft.size() + " blocks). Hold right-click and drag to add, "
-                + "sneak to remove.");
     }
 
-    public void groupMode(boolean box) {
-        if (draft == null) {
-            error("No active group. /bs group new <id> or /bs group edit <id> first.");
-            return;
-        }
-        if (tool != Tool.GROUP) {
-            tool = Tool.GROUP;
-        }
-        groupMode = box ? GroupMode.BOX : GroupMode.FILL;
-        groupCorner = null;
-        changed();
-        info(box ? "§7Box: right-click the first corner." : "§7Fill: right-click a block to add every connected block of that type.");
-    }
-
-    public void groupDone() {
-        if (draft == null) {
-            error("No active group.");
-            return;
-        }
-        String id = draft.id();
-        closeGroup();
-        info("§7Closed group §f" + id + "§7.");
-    }
-
-    private void closeGroup() {
+    public void closeGroup() {
         if (draft == null) {
             return;
         }
         flush();
         draft = null;
         draftBase = null;
-        groupCorner = null;
-        groupMode = GroupMode.PAINT;
         draftChanged();
     }
 
-    private void groupClick(Player player) {
+    private void groupDown(Cursor at) {
         if (draft == null) {
-            error("No active group. /bs group new <id> or /bs group edit <id> first.");
+            if (hovered instanceof Group group) {
+                groupEdit(group.id());
+                return;
+            }
+            notifier.error("Pick a group in the Outliner or press + Group first.");
             return;
         }
-        BlockHitResult hit = blockHit(player);
-        if (hit == null) {
+        if (at.hit() == null) {
             return;
         }
-        BlockPos pos = hit.getBlockPos();
-        switch (groupMode) {
-            case PAINT -> paintAt(pos, player.isShiftKeyDown());
-            case BOX -> {
-                if (groupCorner == null) {
-                    groupCorner = pos;
-                    paintLocked = true;
-                    info("§7Box corner 1 at " + MarkerText.xyz(pos) + ". Right-click the opposite corner.");
-                    return;
-                }
-                Shape.Box box = BlockSelection.bounds(groupCorner.getX(), groupCorner.getY(), groupCorner.getZ(),
-                        pos.getX(), pos.getY(), pos.getZ());
-                groupCorner = null;
-                groupMode = GroupMode.PAINT;
-                paintLocked = true;
-                long volume = (long) (box.maxX() - box.minX() + 1) * (box.maxY() - box.minY() + 1) * (box.maxZ() - box.minZ() + 1);
-                if (volume > MAX_BOX_VOLUME) {
-                    error("That box is " + volume + " blocks; the most a group box scans is " + MAX_BOX_VOLUME + ".");
-                    return;
-                }
-                BlockSelection.Result result = BlockSelection.box(box,
-                        packed -> !player.level().getBlockState(BlockPos.of(packed)).isAir(),
-                        EditorProtocol.MAX_GROUP_BLOCKS);
-                addBlocks(result, "box");
+        BlockPos pos = at.block();
+        if (at.alt() || brushMode == BrushMode.FILL) {
+            Level level = Minecraft.getInstance().level;
+            if (level == null) {
+                return;
             }
-            case FILL -> {
-                groupMode = GroupMode.PAINT;
-                paintLocked = true;
-                Block block = player.level().getBlockState(pos).getBlock();
-                BlockSelection.Result result = BlockSelection.flood(BlockPosPacking.pack(pos.getX(), pos.getY(), pos.getZ()),
-                        packed -> player.level().getBlockState(BlockPos.of(packed)).is(block),
-                        EditorProtocol.MAX_GROUP_BLOCKS, BlockSelection.FILL_RADIUS);
-                addBlocks(result, "fill");
+            Block block = level.getBlockState(pos).getBlock();
+            BlockSelection.Result result = BlockSelection.flood(BlockPosPacking.pack(pos.getX(), pos.getY(), pos.getZ()),
+                    packed -> level.getBlockState(BlockPos.of(packed)).is(block),
+                    EditorProtocol.MAX_GROUP_BLOCKS - draft.size(), BlockSelection.FILL_RADIUS);
+            int added = draft.addAll(result.blocks());
+            draftChanged();
+            markDirty();
+            notifier.ok("Filled " + added + " blocks", draft.id() + " · " + draft.size() + " / " + EditorProtocol.MAX_GROUP_BLOCKS);
+            if (draft.full() || result.capped()) {
+                notifier.error("Group " + draft.id() + " is capped at " + EditorProtocol.MAX_GROUP_BLOCKS + " blocks.");
             }
+            return;
         }
+        painting = true;
+        Level level = Minecraft.getInstance().level;
+        paintBlock = level == null ? null : level.getBlockState(pos).getBlock();
+        lastPainted = null;
+        paint(at);
     }
 
-    private void addBlocks(BlockSelection.Result result, String what) {
-        int added = draft.addAll(result.blocks());
-        draftChanged();
-        markDirty();
-        String text = "§7" + capitalise(what) + " added §f" + added + "§7 blocks to §f" + draft.id() + "§7 (" + draft.size() + ").";
-        info(text);
-        if (draft.full() || result.capped()) {
-            error("Group " + draft.id() + " is capped at " + EditorProtocol.MAX_GROUP_BLOCKS + " blocks; the rest were not added.");
-        }
+    private boolean erasing(Cursor at) {
+        return brushMode == BrushMode.ERASE ^ at.ctrl();
     }
 
-    private void paint(Player player) {
-        HitResult hit = player.pick(REACH, 1.0f, false);
-        if (!(hit instanceof BlockHitResult block) || hit.getType() != HitResult.Type.BLOCK) {
+    private void paint(Cursor at) {
+        if (draft == null || at.hit() == null) {
             return;
         }
-        BlockPos pos = block.getBlockPos();
-        long packed = BlockPosPacking.pack(pos.getX(), pos.getY(), pos.getZ());
+        BlockPos centre = at.block();
+        long packed = BlockPosPacking.pack(centre.getX(), centre.getY(), centre.getZ());
         if (lastPainted != null && lastPainted == packed) {
             return;
         }
         lastPainted = packed;
-        paintAt(pos, player.isShiftKeyDown());
-    }
-
-    private void paintAt(BlockPos pos, boolean remove) {
-        long packed = BlockPosPacking.pack(pos.getX(), pos.getY(), pos.getZ());
-        if (remove) {
-            if (draft.remove(packed)) {
-                draftChanged();
-                markDirty();
-            }
+        Level level = Minecraft.getInstance().level;
+        if (level == null) {
             return;
         }
-        switch (draft.add(packed)) {
-            case ADDED -> {
-                draftChanged();
-                markDirty();
-            }
-            case FULL -> {
-                if (!fullWarned) {
-                    fullWarned = true;
-                    error("Group " + draft.id() + " is full: " + EditorProtocol.MAX_GROUP_BLOCKS + " blocks at most.");
+        boolean erase = erasing(at);
+        boolean changed = false;
+        int r = brushRadius;
+        for (int dy = -r; dy <= r; dy++) {
+            for (int dz = -r; dz <= r; dz++) {
+                for (int dx = -r; dx <= r; dx++) {
+                    if (dx * dx + dy * dy + dz * dz > r * r + r) {
+                        continue;
+                    }
+                    BlockPos pos = centre.offset(dx, dy, dz);
+                    long key = BlockPosPacking.pack(pos.getX(), pos.getY(), pos.getZ());
+                    if (erase) {
+                        changed |= draft.remove(key);
+                        continue;
+                    }
+                    BlockState state = level.getBlockState(pos);
+                    if (state.isAir() || sameBlock && paintBlock != null && !state.is(paintBlock)) {
+                        continue;
+                    }
+                    GroupDraft.Outcome outcome = draft.add(key);
+                    if (outcome == GroupDraft.Outcome.ADDED) {
+                        changed = true;
+                    } else if (outcome == GroupDraft.Outcome.FULL && !fullWarned) {
+                        fullWarned = true;
+                        notifier.error("Group " + draft.id() + " is full: " + EditorProtocol.MAX_GROUP_BLOCKS + " blocks at most.");
+                    }
                 }
             }
-            case PRESENT -> {
-            }
         }
+        if (changed) {
+            draftChanged();
+            markDirty();
+        }
+    }
+
+    public void brushRadius(int delta) {
+        brushRadius = Math.clamp(brushRadius + delta, 0, EditorLayout.MAX_BRUSH);
+        changed();
     }
 
     private void markDirty() {
@@ -450,159 +769,562 @@ public final class EditorTools {
         Group after = draftBase == null
                 ? new Group(draft.id(), draft.blocks(), List.of(), Map.of())
                 : MarkerEdits.withBlocks(draftBase, draft.blocks());
+        if (draftBase != null && Arrays.equals(draftBase.blocks(), after.blocks())) {
+            return;
+        }
         String problem = editor.edit(new MarkerHistory.Change(draftBase, after));
         if (problem != null) {
-            error(problem);
+            notifier.error(problem);
             return;
         }
         draftBase = after;
     }
 
-    public void regionBox(String id) {
-        if (!checkRegionId(id)) {
+    private void boxDown(Cursor at) {
+        if (at.hit() == null) {
             return;
         }
-        resetRegion();
-        regionId = id;
-        tool = Tool.REGION;
+        boxStart = at.block();
+        boxDraft = BlockSelection.bounds(boxStart.getX(), boxStart.getY(), boxStart.getZ(), boxStart.getX(),
+                boxStart.getY(), boxStart.getZ());
         changed();
-        info("§7Region box" + (id == null ? "" : " §f" + id) + "§7: right-click two corners.");
     }
 
-    public void regionPoly(String id) {
-        if (!checkRegionId(id)) {
+    private Region selectedRegion(boolean polygonShape) {
+        Selection s = primary();
+        if (s == null || s.type() != MarkerType.REGION || selection.size() != 1) {
+            return null;
+        }
+        Marker marker = current(s);
+        if (marker instanceof Region region && region.shape() instanceof Shape.Polygon == polygonShape) {
+            return region;
+        }
+        return null;
+    }
+
+    public void confirm() {
+        if (tool == Tool.BOX && boxDraft != null) {
+            confirmBox();
+        } else if (tool == Tool.REGION && polygon.size() >= EditorProtocol.MIN_POLYGON_VERTICES) {
+            closePolygon();
+        }
+    }
+
+    private void confirmBox() {
+        Shape.Box box = boxDraft;
+        if (boxAsGroup) {
+            long volume = (long) (box.maxX() - box.minX() + 1) * (box.maxY() - box.minY() + 1) * (box.maxZ() - box.minZ() + 1);
+            if (volume > MAX_BOX_VOLUME) {
+                notifier.error("That box is " + volume + " blocks; a group box scans at most " + MAX_BOX_VOLUME + ".");
+                return;
+            }
+            Level level = Minecraft.getInstance().level;
+            if (level == null) {
+                return;
+            }
+            BlockSelection.Result result = BlockSelection.box(box, packed -> !level.getBlockState(BlockPos.of(packed)).isAir(),
+                    EditorProtocol.MAX_GROUP_BLOCKS);
+            Set<String> taken = new HashSet<>(editor.store().markers(MarkerType.GROUP).keySet());
+            taken.addAll(reserved);
+            String id = MarkerIds.next("group", taken);
+            Group group = new Group(id, result.blocks(), List.of(), Map.of());
+            if (edit(new MarkerHistory.Change(null, group))) {
+                reserved.add(id);
+                boxDraft = null;
+                select(key(group), false);
+                notifier.ok("Created " + id, result.blocks().length + " blocks" + (result.capped() ? " (capped)" : ""));
+            }
             return;
         }
-        resetRegion();
-        regionId = id;
-        regionPoly = true;
-        polygon = new PolygonBuilder();
-        tool = Tool.REGION;
+        if (createRegion(box)) {
+            boxDraft = null;
+        }
+    }
+
+    private void regionDown(Cursor at) {
+        if (at.hit() == null) {
+            return;
+        }
+        BlockPos pos = at.block();
+        if (polygon.size() >= EditorProtocol.MIN_POLYGON_VERTICES && at.view() != null) {
+            int[] first = polygon.getFirst();
+            float[] screen = at.view().project(first[0] + 0.5, first[1] + 1, first[2] + 0.5);
+            if (closes(pos.getX(), pos.getZ()) || screen != null
+                    && Math.hypot(screen[0] - at.x(), screen[1] - at.y()) <= HANDLE_RADIUS * 1.5) {
+                closePolygon();
+                return;
+            }
+        }
+        if (!polygon.isEmpty()) {
+            int[] last = polygon.getLast();
+            if (last[0] == pos.getX() && last[2] == pos.getZ()) {
+                return;
+            }
+        }
+        if (polygon.size() >= EditorProtocol.MAX_POLYGON_VERTICES) {
+            notifier.error("A polygon has at most " + EditorProtocol.MAX_POLYGON_VERTICES + " vertices.");
+            return;
+        }
+        polygon.add(new int[]{pos.getX(), pos.getY(), pos.getZ()});
         changed();
-        info("§7Region polygon" + (id == null ? "" : " §f" + id) + "§7: right-click each vertex, then /bs region done.");
     }
 
-    private boolean checkRegionId(String id) {
-        if (id == null) {
-            return true;
+    public boolean closes(int x, int z) {
+        PolygonBuilder builder = new PolygonBuilder();
+        for (int[] v : polygon) {
+            builder.add(v[0], v[1], v[2]);
         }
-        String problem = MarkerCheck.id(id);
-        if (problem == null && editor.store().get(MarkerType.REGION, id) != null) {
-            problem = "Region " + id + " already exists.";
-        }
-        if (problem != null) {
-            error(problem);
-            return false;
-        }
-        return true;
+        return builder.closesAt(x, z);
     }
 
-    public void regionDone() {
-        if (!regionPoly || polygon == null) {
-            error("No polygon in progress. /bs region poly first.");
-            return;
+    private void closePolygon() {
+        PolygonBuilder builder = new PolygonBuilder();
+        for (int[] v : polygon) {
+            String problem = builder.add(v[0], v[1], v[2]);
+            if (problem != null) {
+                notifier.error(problem);
+                return;
+            }
         }
         Shape.Polygon shape;
         try {
-            shape = polygon.build(heightMin, heightMax);
+            shape = builder.build(polyMinY, polyMaxY);
         } catch (IllegalArgumentException e) {
-            error(e.getMessage());
+            notifier.error(e.getMessage());
             return;
         }
         if (createRegion(shape)) {
-            polygon = new PolygonBuilder();
-            heightMin = null;
-            heightMax = null;
-        }
-    }
-
-    public void regionHeight(int minY, int maxY) {
-        if (minY > maxY) {
-            error("minY must not be above maxY.");
-            return;
-        }
-        if (tool == Tool.REGION && (regionCorner != null || polygon != null && polygon.vertices() > 0)) {
-            heightMin = minY;
-            heightMax = maxY;
-            info("§7The region being drawn will span Y §f" + minY + "§7 to §f" + maxY + "§7.");
-            return;
-        }
-        if (selectedMarker() instanceof Region region) {
-            Region after = MarkerEdits.withShape(region, MarkerEdits.withHeight(region.shape(), minY, maxY));
-            report(editor.edit(new MarkerHistory.Change(region, after)), "§7Region §f" + region.id() + "§7 now spans Y §f"
-                    + minY + "§7 to §f" + maxY + "§7.");
-            return;
-        }
-        heightMin = minY;
-        heightMax = maxY;
-        info("§7The next region will span Y §f" + minY + "§7 to §f" + maxY + "§7.");
-    }
-
-    private void regionClick(Player player) {
-        BlockHitResult hit = blockHit(player);
-        if (hit == null) {
-            return;
-        }
-        BlockPos pos = hit.getBlockPos();
-        if (regionPoly) {
-            if (polygon == null) {
-                polygon = new PolygonBuilder();
-            }
-            String problem = polygon.add(pos.getX(), pos.getY(), pos.getZ());
-            if (problem != null) {
-                error(problem);
-                return;
-            }
-            info("§7Vertex §f" + polygon.vertices() + "§7 at " + pos.getX() + " " + pos.getZ()
-                    + (polygon.vertices() >= EditorProtocol.MIN_POLYGON_VERTICES ? ". /bs region done closes it." : "."));
-            changed();
-            return;
-        }
-        if (regionCorner == null) {
-            regionCorner = pos;
-            info("§7Region corner 1 at " + MarkerText.xyz(pos) + ". Right-click the opposite corner.");
-            changed();
-            return;
-        }
-        Shape.Box box = BlockSelection.bounds(regionCorner.getX(), regionCorner.getY(), regionCorner.getZ(),
-                pos.getX(), pos.getY(), pos.getZ());
-        if (heightMin != null) {
-            box = (Shape.Box) MarkerEdits.withHeight(box, heightMin, heightMax);
-        }
-        regionCorner = null;
-        if (createRegion(box)) {
-            heightMin = null;
-            heightMax = null;
+            polygon.clear();
         }
     }
 
     private boolean createRegion(Shape shape) {
         Set<String> taken = new HashSet<>(editor.store().markers(MarkerType.REGION).keySet());
         taken.addAll(reserved);
-        String id = regionId != null ? regionId : MarkerIds.next("region", taken);
+        String id = MarkerIds.next("region", taken);
         Region region = new Region(id, shape, List.of(), Map.of());
-        if (!report(editor.edit(new MarkerHistory.Change(null, region)), "§7Created region §f" + id + "§7 ("
-                + MarkerText.shape(shape) + ").")) {
+        if (!edit(new MarkerHistory.Change(null, region))) {
             return false;
         }
         reserved.add(id);
-        regionId = null;
-        select(new Selection(MarkerType.REGION, id), false);
+        select(key(region), false);
+        notifier.ok("Created " + id, MarkerText.shape(shape));
         return true;
     }
 
-    private void resetRegion() {
-        regionPoly = false;
-        regionId = null;
-        regionCorner = null;
-        polygon = null;
-        heightMin = null;
-        heightMax = null;
+    private void brushDown(Cursor at) {
+        if (at.hit() == null) {
+            notifier.error("Point the cursor at a block to run the brush.");
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        Direction facing = mc.player == null ? Direction.NORTH : mc.player.getDirection();
+        brushes.run(at.block(), at.hit().getDirection(), facing, at.shift());
     }
 
-    public boolean rename(String to) {
-        Marker marker = requireSelected();
-        if (marker == null) {
+    public List<Handle> handles() {
+        List<Handle> handles = new ArrayList<>();
+        Cursor at = cursor;
+        if (at == null || at.view() == null) {
+            return handles;
+        }
+        switch (tool) {
+            case MOVE -> {
+                double[] centre = selectionCentre();
+                if (centre != null) {
+                    double[] delta = moveDelta() != null ? moveDelta : new double[]{0, 0, 0};
+                    double ox = centre[0] + delta[0];
+                    double oy = centre[1] + delta[1];
+                    double oz = centre[2] + delta[2];
+                    double size = gizmoSize(at, ox, oy, oz);
+                    for (Axis axis : Axis.values()) {
+                        handles.add(new Handle(HandleKind.GIZMO, ox + axis.dx * size, oy + axis.dy * size, oz + axis.dz * size,
+                                axis, 0, 0));
+                    }
+                    handles.add(new Handle(HandleKind.GIZMO_CENTRE, ox, oy, oz, null, 0, 0));
+                }
+            }
+            case BOX -> {
+                Shape.Box box = drag != null && liveShape instanceof Shape.Box live ? live : boxDraft;
+                if (box == null) {
+                    Region region = selectedRegion(false);
+                    box = region == null ? null : (Shape.Box) region.shape();
+                }
+                if (box != null && boxStart == null) {
+                    double cx = (box.minX() + box.maxX() + 1) / 2.0;
+                    double cy = (box.minY() + box.maxY() + 1) / 2.0;
+                    double cz = (box.minZ() + box.maxZ() + 1) / 2.0;
+                    handles.add(new Handle(HandleKind.BOX_FACE, box.minX(), cy, cz, Axis.X, 0, 0));
+                    handles.add(new Handle(HandleKind.BOX_FACE, box.maxX() + 1, cy, cz, Axis.X, 1, 0));
+                    handles.add(new Handle(HandleKind.BOX_FACE, cx, box.minY(), cz, Axis.Y, 0, 0));
+                    handles.add(new Handle(HandleKind.BOX_FACE, cx, box.maxY() + 1, cz, Axis.Y, 1, 0));
+                    handles.add(new Handle(HandleKind.BOX_FACE, cx, cy, box.minZ(), Axis.Z, 0, 0));
+                    handles.add(new Handle(HandleKind.BOX_FACE, cx, cy, box.maxZ() + 1, Axis.Z, 1, 0));
+                }
+            }
+            case REGION -> {
+                if (!polygon.isEmpty()) {
+                    for (int i = 0; i < polygon.size(); i++) {
+                        int[] v = polygon.get(i);
+                        handles.add(new Handle(HandleKind.POLY_VERTEX, v[0] + 0.5, v[1] + 1, v[2] + 0.5, null, i, 0));
+                    }
+                } else {
+                    Region region = selectedRegion(true);
+                    if (region != null) {
+                        Shape.Polygon p = (Shape.Polygon) (drag != null && liveShape != null ? liveShape : region.shape());
+                        int[] xz = p.xz();
+                        for (int i = 0; i < p.vertices(); i++) {
+                            handles.add(new Handle(HandleKind.POLY_VERTEX, xz[2 * i] + 0.5, p.minY(), xz[2 * i + 1] + 0.5, null, i, 0));
+                        }
+                        double[] c = MarkerPick.centre(p);
+                        handles.add(new Handle(HandleKind.POLY_TOP, c[0], p.maxY() + 1, c[2], Axis.Y, 1, 0));
+                        handles.add(new Handle(HandleKind.POLY_BOTTOM, c[0], p.minY(), c[2], Axis.Y, 0, 0));
+                    }
+                }
+            }
+            case POINT -> {
+                for (Marker marker : selectedMarkers()) {
+                    if (marker instanceof Point p && selection.size() == 1) {
+                        float yaw = liveYaw() != null ? liveYaw : p.yaw();
+                        double rad = Math.toRadians(yaw);
+                        handles.add(new Handle(HandleKind.YAW, p.x() - Math.sin(rad) * 1.2, p.y() + 0.15,
+                                p.z() + Math.cos(rad) * 1.2, null, 0, 0));
+                    }
+                }
+            }
+            default -> {
+            }
+        }
+        return handles;
+    }
+
+    public double gizmoSize(Cursor at, double x, double y, double z) {
+        MarkerPick.Ray ray = at.ray();
+        double dx = x - ray.x();
+        double dy = y - ray.y();
+        double dz = z - ray.z();
+        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        Minecraft mc = Minecraft.getInstance();
+        double fov = Math.toRadians(mc.options.fov().get());
+        return GizmoMath.worldSize(distance, fov, at.view().height(), GIZMO_PIXELS * EditorScale.ui());
+    }
+
+    public double[] selectionCentre() {
+        List<Marker> markers = selectedMarkers();
+        if (markers.isEmpty()) {
+            return null;
+        }
+        double sx = 0;
+        double sy = 0;
+        double sz = 0;
+        int n = 0;
+        for (Marker marker : markers) {
+            double[] c = MarkerText.centre(marker);
+            if (c != null) {
+                sx += c[0];
+                sy += c[1];
+                sz += c[2];
+                n++;
+            }
+        }
+        return n == 0 ? null : new double[]{sx / n, sy / n, sz / n};
+    }
+
+    public Handle handleAt(Cursor at) {
+        if (at.view() == null) {
+            return null;
+        }
+        List<Handle> handles = handles();
+        float radius = HANDLE_RADIUS * EditorScale.ui();
+        Handle best = null;
+        double bestDistance = radius;
+        float[] origin = null;
+        float[][] tips = new float[3][];
+        for (Handle handle : handles) {
+            float[] screen = at.view().project(handle.x(), handle.y(), handle.z());
+            if (handle.kind() == HandleKind.GIZMO) {
+                tips[handle.axis().ordinal()] = screen;
+                continue;
+            }
+            if (handle.kind() == HandleKind.GIZMO_CENTRE) {
+                origin = screen;
+            }
+            if (screen == null) {
+                continue;
+            }
+            double distance = Math.hypot(screen[0] - at.x(), screen[1] - at.y());
+            if (distance <= bestDistance) {
+                best = handle;
+                bestDistance = distance;
+            }
+        }
+        if (best != null) {
+            return best;
+        }
+        Axis axis = GizmoMath.hovered(at.x(), at.y(), origin, tips, radius * 0.8f);
+        if (axis != null) {
+            for (Handle handle : handles) {
+                if (handle.kind() == HandleKind.GIZMO && handle.axis() == axis) {
+                    return handle;
+                }
+            }
+        }
+        return null;
+    }
+
+    private void beginDrag(Handle handle, Cursor at) {
+        List<Marker> before = selectedMarkers();
+        Shape.Box box = null;
+        int[] vertex = null;
+        if (handle.kind() == HandleKind.BOX_FACE) {
+            Region region = boxDraft == null ? selectedRegion(false) : null;
+            box = boxDraft != null ? boxDraft : region == null ? null : (Shape.Box) region.shape();
+            before = region == null ? List.of() : List.of(region);
+        } else if (handle.kind() == HandleKind.POLY_VERTEX && !polygon.isEmpty()) {
+            vertex = polygon.get(handle.index()).clone();
+            before = List.of();
+        } else if (handle.kind() == HandleKind.POLY_VERTEX || handle.kind() == HandleKind.POLY_TOP
+                || handle.kind() == HandleKind.POLY_BOTTOM) {
+            Region region = selectedRegion(true);
+            before = region == null ? List.of() : List.of(region);
+        }
+        drag = new Drag(handle, at.ray(), before, box, vertex);
+        moveDelta = new double[]{0, 0, 0};
+        liveShape = null;
+        liveYaw = null;
+    }
+
+    private void updateDrag(Cursor at) {
+        Handle handle = drag.handle();
+        switch (handle.kind()) {
+            case GIZMO -> {
+                double[] centre = selectionCentre();
+                if (centre != null) {
+                    moveDelta = GizmoMath.dragDelta(drag.start(), at.ray(), centre[0], centre[1], centre[2], handle.axis(),
+                            at.ctrl() && allPoints());
+                }
+            }
+            case GIZMO_CENTRE -> {
+                double[] centre = selectionCentre();
+                if (centre != null) {
+                    double[] from = GizmoMath.planeHit(drag.start(), centre[1]);
+                    double[] to = GizmoMath.planeHit(at.ray(), centre[1]);
+                    if (from != null && to != null) {
+                        boolean free = at.ctrl() && allPoints();
+                        moveDelta = new double[]{GizmoMath.snap(to[0] - from[0], free), 0, GizmoMath.snap(to[2] - from[2], free)};
+                    }
+                }
+            }
+            case BOX_FACE -> {
+                if (drag.box() == null) {
+                    return;
+                }
+                double[] d = GizmoMath.dragDelta(drag.start(), at.ray(), handle.x(), handle.y(), handle.z(), handle.axis(), false);
+                int delta = (int) (d[0] + d[1] + d[2]);
+                Shape.Box b = drag.box();
+                int[] min = {b.minX(), b.minY(), b.minZ()};
+                int[] max = {b.maxX(), b.maxY(), b.maxZ()};
+                int axis = handle.axis().ordinal();
+                if (handle.index() == 0) {
+                    min[axis] = Math.min(min[axis] + delta, max[axis]);
+                } else {
+                    max[axis] = Math.max(max[axis] + delta, min[axis]);
+                }
+                Shape.Box live = new Shape.Box(min[0], min[1], min[2], max[0], max[1], max[2]);
+                if (boxDraft != null) {
+                    boxDraft = live;
+                    changed();
+                } else {
+                    liveShape = live;
+                }
+            }
+            case POLY_VERTEX -> {
+                double planeY = handle.y();
+                double[] hit = at.block() != null ? new double[]{at.block().getX() + 0.5, planeY, at.block().getZ() + 0.5}
+                        : GizmoMath.planeHit(at.ray(), planeY);
+                if (hit == null) {
+                    return;
+                }
+                int x = (int) Math.floor(hit[0]);
+                int z = (int) Math.floor(hit[2]);
+                if (drag.vertex() != null) {
+                    int[] v = polygon.get(handle.index());
+                    v[0] = x;
+                    v[2] = z;
+                    changed();
+                } else if (!drag.before().isEmpty() && drag.before().getFirst() instanceof Region region
+                        && region.shape() instanceof Shape.Polygon p) {
+                    int[] xz = p.xz().clone();
+                    xz[2 * handle.index()] = x;
+                    xz[2 * handle.index() + 1] = z;
+                    liveShape = new Shape.Polygon(xz, p.minY(), p.maxY());
+                }
+            }
+            case POLY_TOP, POLY_BOTTOM -> {
+                if (drag.before().isEmpty() || !(drag.before().getFirst() instanceof Region region)
+                        || !(region.shape() instanceof Shape.Polygon p)) {
+                    return;
+                }
+                double[] d = GizmoMath.dragDelta(drag.start(), at.ray(), handle.x(), handle.y(), handle.z(), Axis.Y, false);
+                int delta = (int) d[1];
+                int minY = p.minY();
+                int maxY = p.maxY();
+                if (handle.kind() == HandleKind.POLY_TOP) {
+                    maxY = Math.max(minY, maxY + delta);
+                } else {
+                    minY = Math.min(maxY, minY + delta);
+                }
+                liveShape = new Shape.Polygon(p.xz(), minY, maxY);
+            }
+            case YAW -> {
+                Marker marker = selectedMarkers().isEmpty() ? null : selectedMarkers().getFirst();
+                if (marker instanceof Point p) {
+                    double[] hit = GizmoMath.planeHit(at.ray(), p.y() + 0.15);
+                    if (hit != null) {
+                        float yaw = GizmoMath.yawTowards(p.x(), p.z(), hit[0], hit[2]);
+                        liveYaw = at.shift() ? GizmoMath.snapYaw(yaw, YAW_STEP) : Math.round(yaw);
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean allPoints() {
+        for (Selection s : selection) {
+            if (s.type() != MarkerType.POINT) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void endDrag(Cursor at) {
+        Drag done = drag;
+        drag = null;
+        Handle handle = done.handle();
+        switch (handle.kind()) {
+            case GIZMO, GIZMO_CENTRE -> {
+                double[] delta = moveDelta;
+                moveDelta = new double[]{0, 0, 0};
+                if (delta[0] == 0 && delta[1] == 0 && delta[2] == 0) {
+                    return;
+                }
+                List<MarkerHistory.Op> ops = new ArrayList<>();
+                for (Marker marker : done.before()) {
+                    flushIfDraft(marker);
+                    Marker base = current(key(marker));
+                    if (base != null) {
+                        ops.add(new MarkerHistory.Change(base, MultiEdits.translated(base, delta[0], delta[1], delta[2])));
+                    }
+                }
+                if (editAll(ops)) {
+                    syncDraftFromStore(ops);
+                }
+            }
+            case BOX_FACE, POLY_VERTEX, POLY_TOP, POLY_BOTTOM -> {
+                Shape shape = liveShape;
+                liveShape = null;
+                if (shape != null && !done.before().isEmpty() && done.before().getFirst() instanceof Region region
+                        && !shape.equals(region.shape())) {
+                    String problem = MarkerCheck.shape(shape);
+                    if (problem == null && shape instanceof Shape.Polygon p) {
+                        problem = polygonProblem(p);
+                    }
+                    if (problem != null) {
+                        notifier.error(problem);
+                        return;
+                    }
+                    edit(new MarkerHistory.Change(region, MarkerEdits.withShape(region, shape)));
+                }
+            }
+            case YAW -> {
+                Float yaw = liveYaw;
+                liveYaw = null;
+                Marker marker = done.before().isEmpty() ? null : done.before().getFirst();
+                if (yaw != null && marker instanceof Point p && yaw != p.yaw()) {
+                    edit(new MarkerHistory.Change(p, MarkerEdits.moved(p, p.x(), p.y(), p.z(), yaw)));
+                }
+            }
+        }
+    }
+
+    private static String polygonProblem(Shape.Polygon p) {
+        PolygonBuilder builder = new PolygonBuilder();
+        int[] xz = p.xz();
+        for (int i = 0; i < xz.length; i += 2) {
+            String problem = builder.add(xz[i], p.minY(), xz[i + 1]);
+            if (problem != null) {
+                return problem;
+            }
+        }
+        try {
+            builder.build(p.minY(), p.maxY());
+        } catch (IllegalArgumentException e) {
+            return e.getMessage();
+        }
+        return null;
+    }
+
+    private void flushIfDraft(Marker marker) {
+        if (draft != null && marker instanceof Group group && group.id().equals(draft.id())) {
+            flush();
+        }
+    }
+
+    private void syncDraftFromStore(List<MarkerHistory.Op> ops) {
+        for (MarkerHistory.Op op : ops) {
+            if (draft != null && op instanceof MarkerHistory.Change c && c.after() instanceof Group group
+                    && group.id().equals(draft.id())) {
+                draft.reset(group.blocks());
+                draftBase = group;
+                draftChanged();
+            }
+        }
+    }
+
+    public boolean edit(MarkerHistory.Op op) {
+        String problem = editor.edit(op);
+        if (problem != null) {
+            notifier.error(problem);
+            return false;
+        }
+        if (op instanceof MarkerHistory.Change c && draft != null && c.type() == MarkerType.GROUP && c.id().equals(draft.id())) {
+            if (c.after() instanceof Group group) {
+                draftBase = group;
+                if (!Arrays.equals(group.blocks(), draft.blocks())) {
+                    draft.reset(group.blocks());
+                    draftChanged();
+                }
+            } else {
+                draft = null;
+                draftBase = null;
+                draftDirty = false;
+                draftChanged();
+            }
+        }
+        changed();
+        return true;
+    }
+
+    public boolean editAll(List<? extends MarkerHistory.Op> ops) {
+        boolean all = true;
+        for (MarkerHistory.Op op : ops) {
+            all &= edit(op);
+        }
+        return all && !ops.isEmpty();
+    }
+
+    public boolean change(Marker before, Marker after) {
+        if (before.equals(after)) {
+            return false;
+        }
+        flushIfDraft(before);
+        Marker base = current(key(before));
+        return edit(new MarkerHistory.Change(base == null ? before : base, after));
+    }
+
+    public boolean rename(Marker marker, String to) {
+        if (marker.id().equals(to)) {
             return false;
         }
         String problem = MarkerCheck.id(to);
@@ -610,60 +1332,76 @@ public final class EditorTools {
             problem = "A " + MarkerText.type(marker.type()) + " named " + to + " already exists.";
         }
         if (problem != null) {
-            error(problem);
+            notifier.error(problem);
             return false;
         }
-        if (!report(editor.edit(new MarkerHistory.Rename(marker.type(), marker.id(), to)), "§7Renamed §f"
-                + marker.id() + "§7 to §f" + to + "§7.")) {
+        flushIfDraft(marker);
+        if (!edit(new MarkerHistory.Rename(marker.type(), marker.id(), to))) {
             return false;
         }
         renamed(marker.type(), marker.id(), to);
         return true;
     }
 
-    public boolean delete() {
-        Marker marker = requireSelected();
-        if (marker == null) {
-            return false;
+    public void delete() {
+        List<Marker> markers = selectedMarkers();
+        if (markers.isEmpty()) {
+            notifier.error("Nothing selected.");
+            return;
         }
-        if (draft != null && marker.type() == MarkerType.GROUP && marker.id().equals(draft.id())) {
-            draft = null;
-            draftBase = null;
-            draftDirty = false;
-            draftChanged();
-        }
-        if (!report(editor.edit(new MarkerHistory.Change(marker, null)), "§7Deleted " + MarkerText.summary(marker) + ".")) {
-            return false;
-        }
-        select(null, false);
-        return true;
-    }
-
-    public boolean change(Marker before, Marker after, String done) {
-        if (before.equals(after)) {
-            info("§7Nothing changed.");
-            return false;
-        }
-        if (!report(editor.edit(new MarkerHistory.Change(before, after)), done)) {
-            return false;
-        }
-        if (draft != null && after instanceof Group group && group.id().equals(draft.id())) {
-            draftBase = group;
-        }
-        return true;
-    }
-
-    public Marker requireSelected() {
         String problem = editor.cannotEdit();
         if (problem != null) {
-            error(problem);
-            return null;
+            notifier.error(problem);
+            return;
         }
-        Marker marker = selectedMarker();
-        if (marker == null) {
-            error(selected == null ? "Nothing selected. Use the select tool or /bs list." : "The selected marker no longer exists.");
+        List<MarkerHistory.Op> ops = new ArrayList<>();
+        for (Marker marker : markers) {
+            if (draft != null && marker.type() == MarkerType.GROUP && marker.id().equals(draft.id())) {
+                draft = null;
+                draftBase = null;
+                draftDirty = false;
+                draftChanged();
+                marker = editor.store().get(MarkerType.GROUP, marker.id());
+                if (marker == null) {
+                    continue;
+                }
+            }
+            ops.add(new MarkerHistory.Change(marker, null));
         }
-        return marker;
+        if (editAll(ops)) {
+            notifier.ok("Deleted " + ops.size() + (ops.size() == 1 ? " marker" : " markers"),
+                    ops.size() == 1 ? ops.getFirst().id() : "");
+            selectNone();
+        }
+    }
+
+    public void duplicate() {
+        List<Marker> markers = selectedMarkers();
+        if (markers.isEmpty()) {
+            notifier.error("Nothing selected to duplicate.");
+            return;
+        }
+        String problem = editor.cannotEdit();
+        if (problem != null) {
+            notifier.error(problem);
+            return;
+        }
+        Set<String> taken = new HashSet<>(reserved);
+        for (Marker marker : editor.store().all()) {
+            taken.add(marker.id());
+        }
+        List<Marker> copies = MultiEdits.duplicate(markers, taken);
+        List<MarkerHistory.Op> ops = new ArrayList<>();
+        for (Marker copy : copies) {
+            ops.add(new MarkerHistory.Change(null, copy));
+            reserved.add(copy.id());
+        }
+        if (editAll(ops)) {
+            selectAll(copies.stream().map(EditorTools::key).toList(), false);
+            tool(Tool.MOVE);
+            notifier.ok("Duplicated " + copies.size() + (copies.size() == 1 ? " marker" : " markers"),
+                    "Drag the gizmo to move the copies.");
+        }
     }
 
     public void undo(boolean redo) {
@@ -672,10 +1410,34 @@ public final class EditorTools {
         }
         MarkerHistory.Op op = redo ? editor.redo() : editor.undo();
         if (op == null) {
-            error(editor.lastStepProblem());
+            notifier.error(editor.lastStepProblem());
             return;
         }
-        info("§7" + (redo ? "Redid: " : "Undid: ") + MarkerText.op(op));
+        applied(op);
+        notifier.ok(redo ? "Redo" : "Undo", MarkerText.op(op));
+    }
+
+    public void jump(int steps) {
+        if (draft != null) {
+            flush();
+        }
+        boolean redo = steps > 0;
+        int done = 0;
+        for (int i = 0; i < Math.abs(steps); i++) {
+            MarkerHistory.Op op = redo ? editor.redo() : editor.undo();
+            if (op == null) {
+                notifier.error(editor.lastStepProblem());
+                break;
+            }
+            applied(op);
+            done++;
+        }
+        if (done > 0) {
+            notifier.ok(redo ? "Redid " + done + " steps" : "Undid " + done + " steps", "");
+        }
+    }
+
+    private void applied(MarkerHistory.Op op) {
         switch (op) {
             case MarkerHistory.Change change -> {
                 if (draft != null && change.type() == MarkerType.GROUP && change.id().equals(draft.id())) {
@@ -686,19 +1448,24 @@ public final class EditorTools {
                         draft = null;
                         draftBase = null;
                     }
+                    draftDirty = false;
                     draftChanged();
                 }
             }
             case MarkerHistory.Rename rename -> renamed(rename.type(), rename.from(), rename.to());
         }
+        changed();
     }
 
     private void renamed(MarkerType type, String from, String to) {
-        if (selected != null && selected.type() == type && selected.id().equals(from)) {
-            selected = new Selection(type, to);
+        List<Selection> next = new ArrayList<>();
+        for (Selection s : selection) {
+            next.add(s.type() == type && s.id().equals(from) ? new Selection(type, to) : s);
         }
-        if (type == MarkerType.POINT && from.equals(grabbed)) {
-            grabbed = to;
+        selection.clear();
+        selection.addAll(next);
+        if (hidden.remove(new Selection(type, from))) {
+            hidden.add(new Selection(type, to));
         }
         if (draft != null && type == MarkerType.GROUP && draft.id().equals(from)) {
             draft.id(to);
@@ -714,109 +1481,19 @@ public final class EditorTools {
         draft = null;
         draftBase = null;
         draftDirty = false;
-        selected = null;
-        forced = null;
-        grabbed = null;
+        selection.clear();
+        hidden.clear();
         reserved.clear();
-        groupCorner = null;
-        groupMode = GroupMode.PAINT;
-        resetRegion();
+        boxDraft = null;
+        boxStart = null;
+        polygon.clear();
+        cancelGesture();
         draftChanged();
     }
 
-    private Marker pick(Player player, double reach) {
-        MarkerStore store = editor.store();
-        HitResult hit = player.pick(reach, 1.0f, false);
-        Long block = hit instanceof BlockHitResult b && hit.getType() == HitResult.Type.BLOCK
-                ? BlockPosPacking.pack(b.getBlockPos().getX(), b.getBlockPos().getY(), b.getBlockPos().getZ()) : null;
-        List<Group> groups = new ArrayList<>(store.all(MarkerType.GROUP, Group.class));
-        if (draft != null) {
-            groups.removeIf(group -> group.id().equals(draft.id()));
-            groups.add(new Group(draft.id(), draft.blocks(), List.of(), Map.of()));
-        }
-        Vec3 feet = player.position();
-        return MarkerPick.pick(ray(player, reach), block, feet.x, feet.y, feet.z,
-                store.all(MarkerType.POINT, Point.class), groups, store.all(MarkerType.REGION, Region.class));
-    }
-
-    private static MarkerPick.Ray ray(Player player, double reach) {
-        Vec3 eye = player.getEyePosition();
-        Vec3 look = player.getViewVector(1.0f);
-        return new MarkerPick.Ray(eye.x, eye.y, eye.z, look.x, look.y, look.z, reach);
-    }
-
-    private static BlockHitResult blockHit(Player player) {
-        HitResult hit = player.pick(REACH, 1.0f, false);
-        if (!(hit instanceof BlockHitResult block) || hit.getType() != HitResult.Type.BLOCK) {
-            error("Not looking at a block (within " + (int) REACH + ").");
-            return null;
-        }
-        return block;
-    }
-
-    private static Vec3 faceCentre(BlockHitResult hit) {
+    public static Vec3 faceCentre(BlockHitResult hit) {
         Direction face = hit.getDirection();
         return Vec3.atCenterOf(hit.getBlockPos()).add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
-    }
-
-    private String actionBar(Player player) {
-        StringBuilder text = new StringBuilder("§6").append(name(tool)).append("§7");
-        switch (tool) {
-            case POINT -> {
-                if (grabbed != null) {
-                    text.append(" moving §f").append(grabbed).append("§7");
-                }
-            }
-            case GROUP -> {
-                if (draft == null) {
-                    text.append(" (no active group)");
-                } else {
-                    text.append(" §f").append(draft.id()).append("§7 ").append(draft.size()).append("/")
-                            .append(EditorProtocol.MAX_GROUP_BLOCKS);
-                    if (groupMode == GroupMode.BOX) {
-                        text.append(groupCorner == null ? " box: corner 1" : " box: corner 2");
-                    } else if (groupMode == GroupMode.FILL) {
-                        text.append(" fill: click a block");
-                    }
-                }
-            }
-            case REGION -> {
-                if (regionPoly) {
-                    text.append(" polygon, ").append(polygon == null ? 0 : polygon.vertices()).append(" vertices");
-                } else {
-                    text.append(regionCorner == null ? " box: corner 1" : " box: corner 2");
-                }
-            }
-            default -> {
-            }
-        }
-        Marker under = pick(player, INSPECT_REACH);
-        if (under != null) {
-            text.append(" §8| §f").append(MarkerText.type(under.type())).append(" §e").append(under.id());
-            if (!under.tags().isEmpty()) {
-                text.append(" §7[").append(String.join(", ", under.tags())).append("]");
-            }
-            text.append(" §7").append(under.props().size()).append(under.props().size() == 1 ? " prop" : " props");
-        }
-        return text.toString();
-    }
-
-    private String hint() {
-        return switch (tool) {
-            case SELECT -> "Right-click a point, group block or region.";
-            case POINT -> "Right-click a block to place a point; sneak + right-click a point to move it.";
-            case GROUP -> draft == null ? "/bs group new <id> or /bs group edit <id>." : "Drag to add, sneak-drag to remove.";
-            case REGION -> "Right-click two corners, or /bs region poly.";
-            case OFF -> "";
-        };
-    }
-
-    private static String name(Tool tool) {
-        return tool.name().toLowerCase(Locale.ROOT);
-    }
-
-    private static String capitalise(String text) {
-        return Character.toUpperCase(text.charAt(0)) + text.substring(1);
     }
 
     private void changed() {
@@ -826,25 +1503,5 @@ public final class EditorTools {
     private void draftChanged() {
         draftVersion++;
         revision++;
-    }
-
-    private static boolean report(String problem, String done) {
-        if (problem != null) {
-            error(problem);
-            return false;
-        }
-        info(done);
-        return true;
-    }
-
-    static void info(String text) {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.player != null) {
-            mc.player.sendSystemMessage(Component.literal(text));
-        }
-    }
-
-    static void error(String text) {
-        info("§c" + text);
     }
 }

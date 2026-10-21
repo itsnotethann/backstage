@@ -24,6 +24,20 @@ public final class PolygonBuilder {
         return null;
     }
 
+    public boolean closesAt(int x, int z) {
+        return vertices() >= EditorProtocol.MIN_POLYGON_VERTICES && xz.getInt(0) == x && xz.getInt(1) == z;
+    }
+
+    public int[] xz() {
+        return xz.toIntArray();
+    }
+
+    public void undoLast() {
+        if (!xz.isEmpty()) {
+            xz.removeElements(xz.size() - 2, xz.size());
+        }
+    }
+
     public int vertices() {
         return xz.size() / 2;
     }
