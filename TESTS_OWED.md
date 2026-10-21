@@ -16,14 +16,26 @@ Checks that need a real Minecraft client.
 | P4 mod handshake | With the mod installed, join the dev server as a player who is not op and not in `editors:`, then run `/bs editor` | No toast and no chat line; `/bs editor` says denied (no permission) |
 | P4 mod handshake | Join the dev server with a vanilla client (no mod) | Joins and plays normally; no errors in the server or client log |
 | P4 mod handshake | With the mod installed, join any server without the receiver (e.g. a vanilla server) and run `/bs editor` | No toast; `/bs editor` says the server has no Backstage editor |
-| P5 markers | As an editor on `./gradlew :minestom:runDev`, `/bs tool point`, right-click a block, then leave and rejoin | A green point with a `point_1` label is drawn again after rejoining |
-| P5 markers | `/bs group new flag`, hold right-click and drag across about 200 blocks, wait a second, then `/edit dump dev` | The blocks glow orange (magenta while painting) and the dump lists group `flag` with 200 blocks |
-| P5 markers | `/bs group box`, click two corners of a box over 3 500 solid blocks | Chat warns the group is capped at 3 500; no more blocks are added |
-| P5 markers | `/bs tool region`, click two corners; then `/bs region poly`, click 5 vertices, `/bs region done` | Both outlines are drawn as cyan bars with a label at the centre |
-| P5 markers | Select a marker, then `/bs tag add boss`, `/bs prop set hp num 500`, `/bs rename boss_spawn`; `/bs delete` another; restart `runDev` and rejoin | Tag, prop, new id and the deletion all survive the restart (`/bs info` and `/edit dump dev`) |
-| P5 markers | `/bs delete` a marker, `/bs editor undo`, then `/bs editor redo` | Undo brings the marker back with its tags and props; redo removes it again |
-| P5 markers | `/bs list all`, click a line, then click `[tp]` | The marker is selected and highlighted yellow for 10 s; `[tp]` only fills `/tp x y z` into the chat box |
-| P5 markers | `/bs editor show groups off`, then `on`; `/bs editor radius 16` | Group overlay disappears and returns; markers further than 16 blocks are no longer drawn |
-| P5 markers | Join the dev server with the mod as a player who is not an editor | No overlays are drawn; `/bs tool point` then a click says the editor is not available, and nothing changes on the server |
-| P5 markers | `/bs tool off`, `/bs use tower`, right-click with the wand | The Lua brush previews and builds exactly as before |
-| P5 markers | Repeat the point, group, region, rename and undo checks on Lunar Client | Same results; overlays render without render hooks |
+| P6 editor mode | As an editor on `./gradlew :minestom:runDev`, press `F8` | Panels slide in, HUD and crosshair are hidden, the cursor is free; hold right mouse to look, WASD/Space/Shift fly, scroll changes fly speed |
+| P6 editor mode | Press `F8` again, then `F8` and `Esc` | Each leaves editor mode: HUD back, mouse grabbed, flying and fly speed as before, no pause menu |
+| P6 editor mode | Join the dev server as a player who is not an editor and press `F8` | Toast "Editor unavailable: Editor access denied: you do not have editor permission." and nothing opens |
+| P6 editor mode | Join a server without the receiver and press `F8` | Toast says the server has no Backstage editor |
+| P6 editor mode | Press `2`, click a block, drag the yaw ring, press `R`; `6`, drag an arrow; `Delete`; then restart `runDev` and rejoin | Point placed, turned, snapped, moved and deleted with no commands; the final state survives the restart |
+| P6 editor mode | Press `3`, `+ Group`, type `flag`, Enter, drag across blocks, Ctrl-drag over some, Alt-click a block; restart `runDev` | Blocks highlight as painted with one merged outline; erased ones drop; fill adds connected blocks; meter counts up to 3 500; group survives the restart |
+| P6 editor mode | Press `4`, drag from one block to another, drag a face handle, Enter (Region, then again with Group) | A box region is created, then a group of the solid blocks in the box; both survive a restart |
+| P6 editor mode | Press `5`, click five blocks, click the first; select the region and drag a vertex and the top handle | Polygon region created and reshaped; survives a restart |
+| P6 editor mode | Press `7`, pick `tower` in the options, Shift-click a block, Apply preview; click a block | Preview particles, then the tower is placed; brush messages appear as toasts, not chat |
+| P6 editor mode | Type in the Outliner search, click a tag chip, Shift-click two rows, double-click a row, press `F` | List filters by id and tag; both rows selected; camera flies to the marker; `F` flies to the selection |
+| P6 editor mode | In the Inspector rename a marker (Enter), scrub X, add a tag (Tab completes), add props of each type, pick a block, delete a prop, Delete then Confirm | Every edit is applied by the server and shows in `/edit dump dev`; delete asks for confirm |
+| P6 editor mode | Shift-select three markers, add a tag in the Inspector, remove a shared tag | All three get and lose the tag |
+| P6 editor mode | `6` with a point selected, drag the X arrow; select a group and drag Y; hold Ctrl while dragging a point | Point and group move in whole blocks; Ctrl moves the point freely |
+| P6 editor mode | Make edits with four tools, press `Ctrl+Z` four times, `Ctrl+Y` twice, open View → History and click the first step | Each tool's edit undoes and redoes; History jumps back to that step |
+| P6 editor mode | `Ctrl+K`, type part of a marker id, Enter; `Ctrl+K`, type "undo", Enter | Palette jumps to the marker; runs Undo |
+| P6 editor mode | Paint a 3 500-block group, fly around it with F3 open | Stays at 60 fps or more with the outline and fill drawn; note the fps |
+| P6 editor mode | Hold `Alt` with a marker behind a wall | Its outline shows through the wall |
+| P6 editor mode | Change GUI scale 2 → 4 while in editor mode | UI and text scale with it and stay crisp |
+| P6 editor mode | Close the game in editor mode with the dock resized and labels off, then reopen and press `F8` | Layout and options come back from `backstage/editor.json` |
+| P6 editor mode | Set Graphics API to Vulkan, restart, press `F8` | Toast says the editor needs the OpenGL renderer |
+| P6 editor mode | Join the dev server with a vanilla client (no mod) | Joins and plays normally |
+| P6 editor mode | Outside editor mode, hold the blaze rod, `/bs use tower`, right-click | The Lua brush previews and builds as before |
+| P6 dev server | Start `./gradlew :minestom:runDev` | Console shows Minestom startup and one Backstage line with port 25566, map `dev` and the editor count; a client with a real account joins in online mode |
